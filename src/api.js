@@ -83,6 +83,21 @@ class TopifyAPI {
     })
   }
 
+  async createCompetitors(projectId, competitors) {
+    return this.mutate('POST', `/projects/${projectId}/competitors`, { competitors })
+  }
+
+  async updateCompetitor(projectId, competitorId, fields) {
+    const body = {}
+    if (fields.name !== undefined) body.name = fields.name
+    if (fields.website !== undefined) body.website = fields.website
+    return this.mutate('PATCH', `/projects/${projectId}/competitors/${competitorId}`, body)
+  }
+
+  async deleteCompetitor(projectId, competitorId) {
+    return this.mutate('DELETE', `/projects/${projectId}/competitors/${competitorId}`)
+  }
+
   // Prompts
   async listPrompts(projectId, opts = {}) {
     return this.request(`/projects/${projectId}/prompts`, {

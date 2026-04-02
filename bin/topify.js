@@ -137,8 +137,12 @@ program
   })
 
 // ============ competitors ============
-program
+const competitors = program
   .command('competitors')
+  .description('Manage competitors')
+
+competitors
+  .command('list')
   .description('List competitors and their metrics')
   .option('-p, --project <id>', 'Project ID')
   .option('-d, --days <n>', 'Lookback days', '7')
@@ -162,9 +166,138 @@ program
       if (opts.json) {
         console.log(slimCompetitors(result.data))
       } else {
-        const competitors = result.data?.active_competitors || []
-        console.log(chalk.bold(`\nCompetitors (last ${opts.days} days) — ${competitors.length} brands\n`))
-        console.log(competitorsTable(competitors))
+        const items = result.data?.active_competitors || []
+        console.log(chalk.bold(`\nCompetitors (last ${opts.days} days) — ${items.length} brands\n`))
+        console.log(competitorsTable(items))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+competitors
+  .command('create')
+  .description('Add one or more competitors')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<competitors...>', 'name:website pairs (e.g. "Acme:acme.com")')
+  .addHelpText('after', `
+Examples:
+  $ topify competitors create "Acme:acme.com"
+  $ topify competitors create "Acme:acme.com" "Globex:globex.net"`)
+  .action(async (pairs, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+
+    const items = pairs.map((pair) => {
+      const sep = pair.indexOf(':')
+      if (sep === -1) {
+        console.error(chalk.red(`Invalid format "${pair}". Use name:website (e.g. "Acme:acme.com")`))
+        process.exit(1)
+      }
+      return { name: pair.slice(0, sep).trim(), website: pair.slice(sep + 1).trim() }
+    })
+
+    const spinner = ora(`Creating ${items.length} competitor(s)...`).start()
+    try {
+      const result = await client.createCompetitors(projectId, items)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const data = result.data || {}
+        console.log(chalk.green(`Created ${data.created || items.length} competitor(s).`))
+        const created = data.competitors || []
+        created.forEach((c) => {
+          console.log(`  ${chalk.dim(c.competitorId || c.competitor_id)} ${c.name} (${c.website})`)
+        })
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+competitors
+  .command('update')
+  .description('Update a competitor')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--name <name>', 'New competitor name')
+  .option('--website <url>', 'New website')
+  .option('--json', 'Output as JSON')
+  .argument('<competitor-id>', 'Competitor ID to update')
+  .addHelpText('after', `
+Examples:
+  $ topify competitors update <id> --name "New Name"
+  $ topify competitors update <id> --website newdomain.com`)
+  .action(async (competitorId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+
+    const fields = {}
+    if (opts.name) fields.name = opts.name
+    if (opts.website) fields.website = opts.website
+
+    if (Object.keys(fields).length === 0) {
+      console.error(chalk.red('Provide at least one field to update: --name or --website'))
+      process.exit(1)
+    }
+
+    const spinner = ora('Updating competitor...').start()
+    try {
+      const result = await client.updateCompetitor(projectId, competitorId, fields)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        console.log(chalk.green('Competitor updated.'))
+        const c = result.data || {}
+        console.log(`  ${chalk.dim('ID:')} ${c.competitorId || c.competitor_id || competitorId}`)
+        if (c.name) console.log(`  ${chalk.dim('Name:')} ${c.name}`)
+        if (c.website) console.log(`  ${chalk.dim('Website:')} ${c.website}`)
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+competitors
+  .command('delete')
+  .description('Delete a competitor')
+  .option('-p, --project <id>', 'Project ID')
+  .option('-y, --yes', 'Skip confirmation')
+  .option('--json', 'Output as JSON')
+  .argument('<competitor-id>', 'Competitor ID to delete')
+  .action(async (competitorId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+
+    if (!opts.yes) {
+      const readline = require('readline')
+      const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+      const answer = await new Promise((resolve) => {
+        rl.question(chalk.yellow(`Delete competitor ${competitorId}? [y/N] `), resolve)
+      })
+      rl.close()
+      if (answer.toLowerCase() !== 'y') {
+        console.error('Aborted.')
+        process.exit(0)
+      }
+    }
+
+    const spinner = ora('Deleting competitor...').start()
+    try {
+      const result = await client.deleteCompetitor(projectId, competitorId)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        console.log(chalk.green(`Competitor ${competitorId} deleted.`))
       }
     } catch (error) {
       spinner.fail(chalk.red(error.message))
