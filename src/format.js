@@ -3,7 +3,7 @@ const Table = require('cli-table3')
 
 function formatPercent(value) {
   if (value === null || value === undefined) return chalk.dim('—')
-  return `${(value * 100).toFixed(1)}%`
+  return `${value.toFixed(1)}%`
 }
 
 function formatFloat(value, decimals = 1) {
@@ -115,4 +115,57 @@ function jsonOutput(data) {
   return JSON.stringify(data, null, 2)
 }
 
-module.exports = { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput, formatPercent, formatDate }
+function slimOverview(data) {
+  const items = data?.items || data || []
+  if (!Array.isArray(items)) return jsonOutput(data)
+
+  const competitorSet = new Set()
+  items.forEach((item) => {
+    (item.competitors_mentioned || []).forEach((c) => competitorSet.add(c.name))
+  })
+
+  const slimmed = items.map((item) => {
+    const competitors = {}
+    ;(item.competitors_mentioned || []).forEach((c) => {
+      competitors[c.name] = c.mention_count
+    })
+    return {
+      prompt_id: item.prompt_id,
+      content: item.content,
+      prompt_type: item.prompt_type,
+      topic_name: item.topic_name,
+      visibility: item.visibility,
+      sentiment: item.sentiment,
+      position: item.position,
+      volume: item.volume,
+      intent: item.intent,
+      cvr: item.cvr,
+      competitors,
+    }
+  })
+
+  return jsonOutput({
+    competitors: [...competitorSet].sort(),
+    items: slimmed,
+  })
+}
+
+function slimCompetitors(data) {
+  const items = data?.active_competitors || data || []
+  if (!Array.isArray(items)) return jsonOutput(data)
+
+  const slimmed = items.map((c) => ({
+    competitor_id: c.competitor_id,
+    name: c.name,
+    website: c.website,
+    is_own_brand: c.is_own_brand,
+    metrics: c.metrics,
+  }))
+
+  if (data?.active_competitors) {
+    return jsonOutput({ ...data, active_competitors: slimmed })
+  }
+  return jsonOutput(slimmed)
+}
+
+module.exports = { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput, slimOverview, slimCompetitors, formatPercent, formatDate }
