@@ -30,6 +30,29 @@ class TopifyAPI {
     return response.json()
   }
 
+  async mutate(method, path, body = null) {
+    const url = `${BASE_URL}${path}`
+    const options = {
+      method,
+      headers: {
+        'X-API-Key': this.apiKey,
+        'Content-Type': 'application/json',
+      },
+    }
+    if (body) {
+      options.body = JSON.stringify(body)
+    }
+
+    const response = await fetch(url, options)
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }))
+      throw new Error(error.detail || error.message || `API error: ${response.status}`)
+    }
+
+    return response.json()
+  }
+
   // Projects
   async listProjects() {
     return this.request('/projects')
@@ -66,6 +89,27 @@ class TopifyAPI {
       page: opts.page,
       page_size: opts.pageSize,
     })
+  }
+
+  async createPrompts(projectId, { prompts, topicId, country }) {
+    return this.mutate('POST', `/projects/${projectId}/prompts`, {
+      prompts,
+      topicId,
+      country: country || undefined,
+    })
+  }
+
+  async updatePrompt(projectId, promptId, fields) {
+    const body = {}
+    if (fields.content !== undefined) body.content = fields.content
+    if (fields.country !== undefined) body.country = fields.country
+    if (fields.topicId !== undefined) body.topicId = fields.topicId
+    if (fields.promptType !== undefined) body.promptType = fields.promptType
+    return this.mutate('PATCH', `/projects/${projectId}/prompts/${promptId}`, body)
+  }
+
+  async deletePrompt(projectId, promptId) {
+    return this.mutate('DELETE', `/projects/${projectId}/prompts/${promptId}`)
   }
 
   async getPromptAnalytics(projectId, promptId, opts = {}) {
