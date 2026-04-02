@@ -5,7 +5,7 @@ const chalk = require('chalk')
 const ora = require('ora')
 const { TopifyAPI } = require('../src/api')
 const { getApiKey, setApiKey, getDefaultProject, setDefaultProject, clearConfig } = require('../src/config')
-const { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput } = require('../src/format')
+const { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput, slimOverview, slimCompetitors } = require('../src/format')
 
 const program = new Command()
 
@@ -121,7 +121,7 @@ program
       spinner.stop()
 
       if (opts.json) {
-        console.log(jsonOutput(result.data))
+        console.log(slimOverview(result.data))
       } else {
         const items = result.data?.items || []
         console.log(chalk.bold(`\nVisibility Overview (last ${opts.days} days) — ${items.length} prompts\n`))
@@ -160,7 +160,7 @@ program
       spinner.stop()
 
       if (opts.json) {
-        console.log(jsonOutput(result.data))
+        console.log(slimCompetitors(result.data))
       } else {
         const competitors = result.data?.active_competitors || []
         console.log(chalk.bold(`\nCompetitors (last ${opts.days} days) — ${competitors.length} brands\n`))
@@ -173,8 +173,12 @@ program
   })
 
 // ============ prompts ============
-program
+const prompts = program
   .command('prompts')
+  .description('Manage tracked prompts')
+
+prompts
+  .command('list')
   .description('List tracked prompts')
   .option('-p, --project <id>', 'Project ID')
   .option('--page <n>', 'Page number', '1')
@@ -194,14 +198,142 @@ program
       if (opts.json) {
         console.log(jsonOutput(result.data))
       } else {
-        const prompts = result.data?.items || result.data || []
-        console.log(chalk.bold(`\n${prompts.length} Prompts\n`))
-        prompts.slice(0, 30).forEach((p, i) => {
+        const items = result.data?.items || result.data || []
+        console.log(chalk.bold(`\n${items.length} Prompts\n`))
+        items.slice(0, 30).forEach((p, i) => {
           console.log(`  ${chalk.dim(i + 1 + '.')} ${p.content || p.keyword || '—'}`)
         })
-        if (prompts.length > 30) {
-          console.log(chalk.dim(`\n  ... and ${prompts.length - 30} more. Use --json for full output.`))
+        if (items.length > 30) {
+          console.log(chalk.dim(`\n  ... and ${items.length - 30} more. Use --json for full output.`))
         }
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+prompts
+  .command('create')
+  .description('Create one or more prompts')
+  .option('-p, --project <id>', 'Project ID')
+  .requiredOption('--topic-id <id>', 'Topic ID (required)')
+  .option('--country <code>', 'Country code (e.g. US, GB)')
+  .option('--json', 'Output as JSON')
+  .argument('<prompts...>', 'Prompt content(s) to create')
+  .addHelpText('after', `
+Examples:
+  $ topify prompts create --topic-id <id> "best CRM for startups"
+  $ topify prompts create --topic-id <id> --country US "prompt one" "prompt two"`)
+  .action(async (promptTexts, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora(`Creating ${promptTexts.length} prompt(s)...`).start()
+    try {
+      const result = await client.createPrompts(projectId, {
+        prompts: promptTexts,
+        topicId: opts.topicId,
+        country: opts.country,
+      })
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const data = result.data || {}
+        console.log(chalk.green(`Created ${data.created || promptTexts.length} prompt(s).`))
+        const created = data.prompts || []
+        created.forEach((p) => {
+          console.log(`  ${chalk.dim(p.id)} ${p.content || ''}`)
+        })
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+prompts
+  .command('update')
+  .description('Update a prompt')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--content <text>', 'New prompt content')
+  .option('--country <code>', 'Country code')
+  .option('--topic-id <id>', 'New topic ID')
+  .option('--prompt-type <type>', 'Prompt type')
+  .option('--json', 'Output as JSON')
+  .argument('<prompt-id>', 'Prompt ID to update')
+  .addHelpText('after', `
+Examples:
+  $ topify prompts update <prompt-id> --content "new prompt text"
+  $ topify prompts update <prompt-id> --country GB --topic-id <id>`)
+  .action(async (promptId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+
+    const fields = {}
+    if (opts.content) fields.content = opts.content
+    if (opts.country) fields.country = opts.country
+    if (opts.topicId) fields.topicId = opts.topicId
+    if (opts.promptType) fields.promptType = opts.promptType
+
+    if (Object.keys(fields).length === 0) {
+      console.error(chalk.red('Provide at least one field to update: --content, --country, --topic-id, or --prompt-type'))
+      process.exit(1)
+    }
+
+    const spinner = ora('Updating prompt...').start()
+    try {
+      const result = await client.updatePrompt(projectId, promptId, fields)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        console.log(chalk.green('Prompt updated.'))
+        const p = result.data || {}
+        console.log(`  ${chalk.dim('ID:')} ${p.id || promptId}`)
+        if (p.content) console.log(`  ${chalk.dim('Content:')} ${p.content}`)
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+prompts
+  .command('delete')
+  .description('Delete a prompt')
+  .option('-p, --project <id>', 'Project ID')
+  .option('-y, --yes', 'Skip confirmation')
+  .option('--json', 'Output as JSON')
+  .argument('<prompt-id>', 'Prompt ID to delete')
+  .action(async (promptId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+
+    if (!opts.yes) {
+      const readline = require('readline')
+      const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+      const answer = await new Promise((resolve) => {
+        rl.question(chalk.yellow(`Delete prompt ${promptId}? [y/N] `), resolve)
+      })
+      rl.close()
+      if (answer.toLowerCase() !== 'y') {
+        console.error('Aborted.')
+        process.exit(0)
+      }
+    }
+
+    const spinner = ora('Deleting prompt...').start()
+    try {
+      const result = await client.deletePrompt(projectId, promptId)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        console.log(chalk.green(`Prompt ${promptId} deleted.`))
       }
     } catch (error) {
       spinner.fail(chalk.red(error.message))
