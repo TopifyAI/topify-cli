@@ -168,4 +168,76 @@ function slimCompetitors(data) {
   return jsonOutput(slimmed)
 }
 
-module.exports = { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput, slimOverview, slimCompetitors, formatPercent, formatDate }
+function actionsTable(actions) {
+  const table = new Table({
+    head: [
+      chalk.bold('#'),
+      chalk.bold('Priority'),
+      chalk.bold('Title'),
+      chalk.bold('Category'),
+      chalk.bold('Status'),
+    ],
+    colWidths: [5, 10, 52, 20, 14],
+    wordWrap: true,
+  })
+
+  actions.forEach((a, i) => {
+    const title = (a.title || '').length > 50 ? (a.title || '').substring(0, 47) + '...' : (a.title || '')
+    const priorityColor = a.priority === 'high' ? chalk.red : a.priority === 'medium' ? chalk.yellow : chalk.dim
+    const statusColor = a.status === 'completed' ? chalk.green : a.status === 'accepted' ? chalk.cyan : a.status === 'ignored' ? chalk.dim : chalk.white
+    table.push([
+      i + 1,
+      priorityColor(a.priority || ''),
+      title,
+      a.category || a.group || '',
+      statusColor(a.status || ''),
+    ])
+  })
+
+  return table.toString()
+}
+
+function actionDetail(a) {
+  const lines = []
+  lines.push(`${chalk.bold('Title:')}       ${a.title || ''}`)
+  lines.push(`${chalk.bold('ID:')}          ${a.id || a.action_id || ''}`)
+  lines.push(`${chalk.bold('Status:')}      ${a.status || ''}`)
+  lines.push(`${chalk.bold('Priority:')}    ${a.priority || ''}`)
+  lines.push(`${chalk.bold('Category:')}    ${a.category || a.group || ''}`)
+  if (a.description) lines.push(`${chalk.bold('Description:')} ${a.description}`)
+  if (a.target_url) lines.push(`${chalk.bold('Target URL:')}  ${a.target_url}`)
+  if (a.target_prompt) lines.push(`${chalk.bold('Target Prompt:')} ${a.target_prompt}`)
+  if (a.execution_status) lines.push(`${chalk.bold('Execution:')}   ${a.execution_status}`)
+  if (a.workflow_id) lines.push(`${chalk.bold('Workflow ID:')} ${a.workflow_id}`)
+  if (a.created_at) lines.push(`${chalk.bold('Created:')}     ${formatDate(a.created_at)}`)
+  if (a.updated_at) lines.push(`${chalk.bold('Updated:')}     ${formatDate(a.updated_at)}`)
+  return lines.join('\n')
+}
+
+function webhooksTable(webhooks) {
+  const table = new Table({
+    head: [
+      chalk.bold('#'),
+      chalk.bold('ID'),
+      chalk.bold('URL'),
+      chalk.bold('Events'),
+      chalk.bold('Created'),
+    ],
+    colWidths: [5, 20, 40, 30, 15],
+    wordWrap: true,
+  })
+
+  webhooks.forEach((w, i) => {
+    table.push([
+      i + 1,
+      w.id || w.webhook_id || '',
+      w.url || '',
+      (w.events || []).join(', '),
+      formatDate(w.created_at),
+    ])
+  })
+
+  return table.toString()
+}
+
+module.exports = { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput, slimOverview, slimCompetitors, formatPercent, formatDate, actionsTable, actionDetail, webhooksTable }

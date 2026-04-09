@@ -172,6 +172,67 @@ class TopifyAPI {
       providers: opts.providers,
     })
   }
+
+  // Actions
+  async listActions(projectId, opts = {}) {
+    return this.request(`/projects/${projectId}/actions`, {
+      status: opts.status,
+      group: opts.group,
+    })
+  }
+
+  async getAction(projectId, actionId) {
+    return this.request(`/projects/${projectId}/actions/${actionId}`)
+  }
+
+  async createAction(projectId, action) {
+    return this.mutate('POST', `/projects/${projectId}/actions`, action)
+  }
+
+  async transitionAction(projectId, actionId, action, body = null) {
+    return this.mutate('PATCH', `/projects/${projectId}/actions/${actionId}/${action}`, body)
+  }
+
+  async batchTransition(projectId, ids, action) {
+    return this.mutate('POST', `/projects/${projectId}/actions/batch-transition`, { ids, action })
+  }
+
+  async recommendActions(projectId) {
+    return this.mutate('POST', `/projects/${projectId}/actions/recommend`, {})
+  }
+
+  async getTaskStatus(projectId, taskId) {
+    return this.request(`/projects/${projectId}/actions/tasks/${taskId}`)
+  }
+
+  async enrichContent(projectId, actionId) {
+    return this.mutate('POST', `/projects/${projectId}/actions/${actionId}/enrich-content`, {})
+  }
+
+  async enrichForum(projectId, actionId) {
+    return this.mutate('POST', `/projects/${projectId}/actions/${actionId}/enrich-forum`, {})
+  }
+
+  async executeAction(projectId, actionId) {
+    return this.mutate('POST', `/projects/${projectId}/actions/${actionId}/execute`, {})
+  }
+
+  async respondToCheckpoint(projectId, actionId, body) {
+    return this.mutate('POST', `/projects/${projectId}/actions/${actionId}/execute/respond`, body)
+  }
+
+  // Webhooks
+  async listWebhooks() {
+    return this.request('/webhooks')
+  }
+
+  async createWebhook(url, events) {
+    return this.mutate('POST', '/webhooks', { url, events })
+  }
+
+  async deleteWebhook(webhookId) {
+    return this.mutate('DELETE', `/webhooks/${webhookId}`)
+  }
 }
 
 module.exports = { TopifyAPI }
