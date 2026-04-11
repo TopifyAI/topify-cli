@@ -5,47 +5,112 @@ Monitor your brand's AI visibility from the command line.
 ## Install
 
 ```bash
-npm install -g @topify/cli
+npm install -g topify-cli
 ```
 
-## Setup
+## Quick Start
 
 ```bash
-# Set your API key (get it at https://app.topify.ai → Settings → API Keys)
+# 1. Set your API key (get it at https://app.topify.ai → Settings → API Keys)
 topify config --api-key tk_live_xxxxxxxxxxxxx
 
-# Set a default project
-topify projects                              # list all projects
-topify config --default-project <project-id> # set default
+# 2. List your projects
+topify projects
+
+# 3. Set a default project so you don't have to pass --project every time
+topify config --default-project <project-id>
+
+# 4. Check your brand visibility
+topify overview
+```
+
+### New user? Create a project from the CLI
+
+If you don't have a project yet, you can create one directly:
+
+```bash
+topify projects create --brand "Acme Corp" --website acme.com --webhook https://example.com/hook
+```
+
+This kicks off Topify's brand tracking pipeline. You'll receive a webhook notification when setup is complete. Then set it as your default:
+
+```bash
+topify config --default-project <project-id>
 ```
 
 ## Commands
 
+### Projects
+
 ```bash
-# Projects
-topify projects              # list all projects
+topify projects                        # list all projects
+topify projects create \
+  --brand "Acme" --website acme.com \
+  --webhook https://example.com/hook   # create a new project
+```
 
-# Overview — visibility summary across all prompts
-topify overview              # last 7 days
-topify overview --days 30    # last 30 days
+### Overview — visibility summary across all prompts
+
+```bash
+topify overview                        # last 7 days
+topify overview --days 30              # last 30 days
 topify overview --from 2026-03-01 --to 2026-03-15
+```
 
-# Competitors — ranked by visibility
-topify competitors
-topify competitors --days 30
+### Competitors
 
-# Prompts — tracked search queries
-topify prompts
+```bash
+topify competitors list                # list competitors and metrics
+topify competitors list --days 30
+topify competitors create "Acme:acme.com" "Globex:globex.net"
+topify competitors update <id> --name "New Name" --website new.com
+topify competitors delete <id>
+```
 
-# Sources — domains cited in AI responses
-topify sources
-topify sources --days 30
+### Prompts — tracked search queries
 
-# Topics — prompt groupings
-topify topics
+```bash
+topify prompts list                    # list tracked prompts
+topify prompts create --topic-id <id> "best CRM for startups"
+topify prompts update <id> --content "new text"
+topify prompts delete <id>
+```
 
-# Trends — visibility over time
-topify trends --days 30 --json
+### Actions — AI-recommended improvements
+
+```bash
+topify actions list                    # list action items
+topify actions list --status suggested # filter by status
+topify actions get <id>                # view action details
+topify actions recommend               # trigger new recommendations
+topify actions task <task-id>          # check recommendation progress
+topify actions accept <id>             # accept an action
+topify actions complete <id>           # mark as completed
+topify actions ignore <id> --reason "not relevant"
+topify actions enrich-content <id>     # generate content edits
+topify actions enrich-forum <id>       # generate a forum comment
+topify actions execute <id>            # start execution workflow
+topify actions respond <id> \
+  --workflow-id <wf-id> \
+  --decision approve                   # respond to a checkpoint
+```
+
+### Webhooks
+
+```bash
+topify webhooks list                   # list registered webhooks
+topify webhooks create \
+  --url https://example.com/hook \
+  --events action.checkpoint,action.completed
+topify webhooks delete <id>
+```
+
+### Other commands
+
+```bash
+topify sources                         # domains cited in AI responses
+topify topics                          # prompt topic groups
+topify trends --days 30                # visibility over time
 ```
 
 ## Options
