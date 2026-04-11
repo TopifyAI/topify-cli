@@ -12,7 +12,7 @@ const program = new Command()
 program
   .name('topify')
   .description('Topify AI Visibility CLI - Monitor your brand in AI search results')
-  .version('0.1.0')
+  .version('0.3.0')
 
 // Helper to get authenticated API client
 function getClient() {
@@ -72,8 +72,12 @@ program
   })
 
 // ============ projects ============
-program
+const projects = program
   .command('projects')
+  .description('Manage projects')
+
+projects
+  .command('list', { isDefault: true })
   .description('List all projects')
   .option('--json', 'Output as JSON')
   .action(async (opts) => {
@@ -82,14 +86,57 @@ program
     try {
       const result = await client.listProjects()
       spinner.stop()
-      const projects = result.data || []
+      const items = result.data || []
 
       if (opts.json) {
-        console.log(jsonOutput(projects))
+        console.log(jsonOutput(items))
       } else {
-        console.log(chalk.bold(`\n${projects.length} Projects\n`))
-        console.log(projectsTable(projects))
+        console.log(chalk.bold(`\n${items.length} Projects\n`))
+        console.log(projectsTable(items))
         console.log(chalk.dim(`\nTip: Set a default project with: topify config --default-project <id>`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+projects
+  .command('create')
+  .description('Create a new brand tracking project')
+  .requiredOption('--brand <name>', 'Brand name to track')
+  .requiredOption('--website <url>', 'Brand website URL')
+  .requiredOption('--webhook <url>', 'Webhook URL for completion notification')
+  .option('--language <code>', 'Prompt language (e.g. en, es, fr)')
+  .option('--location <code>', 'Target market (e.g. US, GB, DE)')
+  .option('--json', 'Output as JSON')
+  .addHelpText('after', `
+Examples:
+  $ topify projects create --brand "Acme Corp" --website acme.com --webhook https://example.com/hook
+  $ topify projects create --brand "Acme" --website acme.com --webhook https://hook.site/abc --language en --location US`)
+  .action(async (opts) => {
+    const client = getClient()
+    const spinner = ora('Creating project...').start()
+    try {
+      const result = await client.createProject({
+        brandName: opts.brand,
+        brandUrl: opts.website,
+        webhookUrl: opts.webhook,
+        language: opts.language,
+        location: opts.location,
+      })
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data || result))
+      } else {
+        const data = result.data || result
+        console.log(chalk.green('Project created!'))
+        console.log(`  ${chalk.dim('Project ID:')} ${data.project_id}`)
+        console.log(`  ${chalk.dim('Status:')}     ${data.status || 'initializing'}`)
+        console.log()
+        console.log(chalk.dim('The brand tracking pipeline is running. You\'ll receive a webhook when it\'s ready.'))
+        console.log(chalk.dim(`Set as default: topify config --default-project ${data.project_id}`))
       }
     } catch (error) {
       spinner.fail(chalk.red(error.message))

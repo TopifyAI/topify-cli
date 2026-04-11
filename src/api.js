@@ -62,6 +62,13 @@ class TopifyAPI {
     return this.request(`/projects/${projectId}`)
   }
 
+  async createProject({ brandName, brandUrl, webhookUrl, language, location }) {
+    const body = { brand_name: brandName, brand_url: brandUrl, webhook_url: webhookUrl }
+    if (language) body.language = language
+    if (location) body.location = location
+    return this.mutate('POST', '/account/projects', body)
+  }
+
   // Overview
   async getOverview(projectId, opts = {}) {
     return this.request(`/projects/${projectId}/overview`, {
