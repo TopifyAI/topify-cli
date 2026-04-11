@@ -5,7 +5,7 @@ const chalk = require('chalk')
 const ora = require('ora')
 const { TopifyAPI } = require('../src/api')
 const { getApiKey, setApiKey, getDefaultProject, setDefaultProject, clearConfig } = require('../src/config')
-const { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput, slimOverview, slimCompetitors } = require('../src/format')
+const { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput, slimOverview, slimCompetitors, actionsTable, actionDetail, webhooksTable } = require('../src/format')
 
 const program = new Command()
 
@@ -562,6 +562,397 @@ program
       })
       spinner.stop()
       console.log(jsonOutput(result.data))
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+// ============ actions ============
+const actions = program
+  .command('actions')
+  .description('Manage action items')
+
+actions
+  .command('list')
+  .description('List action items')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--status <status>', 'Filter by status (suggested|accepted|completed|ignored)')
+  .option('--group <group>', 'Filter by group/category')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Fetching actions...').start()
+    try {
+      const result = await client.listActions(projectId, {
+        status: opts.status,
+        group: opts.group,
+      })
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const items = result.data?.items || result.data || []
+        console.log(chalk.bold(`\n${items.length} Actions\n`))
+        if (items.length === 0) {
+          console.log(chalk.dim('  No actions found. Run `topify actions recommend` to generate suggestions.'))
+        } else {
+          console.log(actionsTable(items))
+        }
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+actions
+  .command('get')
+  .description('Get action details')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<action-id>', 'Action ID')
+  .action(async (actionId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Fetching action...').start()
+    try {
+      const result = await client.getAction(projectId, actionId)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const a = result.data || {}
+        console.log()
+        console.log(actionDetail(a))
+        console.log()
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+for (const [transition, label] of [['accept', 'Accepting'], ['ignore', 'Ignoring'], ['complete', 'Completing'], ['reopen', 'Reopening']]) {
+  const cmd = actions
+    .command(transition)
+    .description(`${transition.charAt(0).toUpperCase() + transition.slice(1)} an action`)
+    .option('-p, --project <id>', 'Project ID')
+    .argument('<action-id>', 'Action ID')
+
+  if (transition === 'ignore') {
+    cmd.option('--reason <reason>', 'Reason for ignoring')
+  }
+
+  cmd.action(async (actionId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora(`${label} action...`).start()
+    try {
+      const body = transition === 'ignore' && opts.reason ? { reason: opts.reason } : null
+      const result = await client.transitionAction(projectId, actionId, transition, body)
+      spinner.stop()
+
+      const newStatus = result.data?.status || transition
+      console.log(chalk.green(`Action ${actionId} -> ${newStatus}`))
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+}
+
+actions
+  .command('recommend')
+  .description('Trigger action recommendations')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Requesting recommendations...').start()
+    try {
+      const result = await client.recommendActions(projectId)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const taskId = result.data?.task_id || result.data?.taskId || ''
+        console.log(chalk.green('Recommendation task started.'))
+        if (taskId) {
+          console.log(`  ${chalk.dim('Task ID:')} ${taskId}`)
+          console.log(chalk.dim(`\nUse \`topify actions task ${taskId}\` to check status.`))
+        }
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+actions
+  .command('task')
+  .description('Check recommendation task status')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<task-id>', 'Task ID')
+  .action(async (taskId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Checking task status...').start()
+    try {
+      const result = await client.getTaskStatus(projectId, taskId)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(`  ${chalk.bold('Status:')} ${d.status || ''}`)
+        if (d.progress !== undefined) console.log(`  ${chalk.bold('Progress:')} ${d.progress}`)
+        if (d.result) console.log(`  ${chalk.bold('Result:')} ${typeof d.result === 'string' ? d.result : JSON.stringify(d.result)}`)
+        if (d.error) console.log(`  ${chalk.bold('Error:')} ${chalk.red(d.error)}`)
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+actions
+  .command('enrich-content')
+  .description('Generate content edits for an action')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<action-id>', 'Action ID')
+  .action(async (actionId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Generating edits...').start()
+    try {
+      const result = await client.enrichContent(projectId, actionId)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const edits = result.data?.edits || result.data || []
+        if (Array.isArray(edits) && edits.length > 0) {
+          console.log(chalk.bold(`\n${edits.length} Edits\n`))
+          edits.forEach((e, i) => {
+            console.log(`  ${chalk.cyan(`${i + 1}.`)} ${chalk.bold(e.section || '')} ${chalk.dim(`[${e.type || ''}]`)}`)
+            if (e.signal) console.log(`     ${chalk.dim('Signal:')} ${e.signal}`)
+            if (e.reason) console.log(`     ${chalk.dim('Reason:')} ${e.reason}`)
+          })
+        } else {
+          console.log(chalk.green('Enrichment complete.'))
+          if (typeof result.data === 'object') console.log(jsonOutput(result.data))
+        }
+        console.log()
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+actions
+  .command('enrich-forum')
+  .description('Generate a forum comment for an action')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<action-id>', 'Action ID')
+  .action(async (actionId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Generating comment...').start()
+    try {
+      const result = await client.enrichForum(projectId, actionId)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const comment = result.data?.comment || result.data?.content || result.data?.text || ''
+        if (comment) {
+          console.log(chalk.bold('\nGenerated Comment:\n'))
+          console.log(comment)
+        } else {
+          console.log(chalk.green('Enrichment complete.'))
+          if (typeof result.data === 'object') console.log(jsonOutput(result.data))
+        }
+        console.log()
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+actions
+  .command('execute')
+  .description('Start action execution workflow')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<action-id>', 'Action ID')
+  .action(async (actionId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Starting execution...').start()
+    try {
+      const result = await client.executeAction(projectId, actionId)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const workflowId = result.data?.workflow_id || result.data?.workflowId || ''
+        console.log(chalk.green('Workflow started.'))
+        if (workflowId) {
+          console.log(`  ${chalk.dim('Workflow ID:')} ${workflowId}`)
+        }
+        console.log(chalk.dim('\nCheckpoints will be delivered to your registered webhook.'))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+actions
+  .command('respond')
+  .description('Respond to an execution checkpoint')
+  .option('-p, --project <id>', 'Project ID')
+  .requiredOption('--workflow-id <id>', 'Workflow ID')
+  .requiredOption('--decision <decision>', 'Decision (approve|edit|regenerate|reject)')
+  .option('--content <text>', 'Edited content (for edit decision)')
+  .option('--feedback <text>', 'Feedback message')
+  .option('--json', 'Output as JSON')
+  .argument('<action-id>', 'Action ID')
+  .action(async (actionId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+
+    const body = {
+      workflow_id: opts.workflowId,
+      decision: opts.decision,
+    }
+    if (opts.content) body.content = opts.content
+    if (opts.feedback) body.feedback = opts.feedback
+
+    const spinner = ora('Sending response...').start()
+    try {
+      const result = await client.respondToCheckpoint(projectId, actionId, body)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        console.log(chalk.green(`Checkpoint response sent: ${opts.decision}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+// ============ webhooks ============
+const webhooks = program
+  .command('webhooks')
+  .description('Manage webhooks')
+
+webhooks
+  .command('list')
+  .description('List registered webhooks')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    const client = getClient()
+    const spinner = ora('Fetching webhooks...').start()
+    try {
+      const result = await client.listWebhooks()
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const items = result.data?.items || result.data || []
+        if (items.length === 0) {
+          console.log(chalk.dim('\nNo webhooks registered.\n'))
+        } else {
+          console.log(chalk.bold(`\n${items.length} Webhooks\n`))
+          console.log(webhooksTable(items))
+        }
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+webhooks
+  .command('create')
+  .description('Create a webhook')
+  .requiredOption('--url <url>', 'Webhook endpoint URL')
+  .requiredOption('--events <events>', 'Comma-separated event types (e.g. action.checkpoint,action.completed,action.failed)')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    const client = getClient()
+    const events = opts.events.split(',').map((e) => e.trim())
+    const spinner = ora('Creating webhook...').start()
+    try {
+      const result = await client.createWebhook(opts.url, events)
+      spinner.stop()
+
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green('Webhook created.'))
+        console.log(`  ${chalk.dim('ID:')}     ${d.id || d.webhook_id || ''}`)
+        console.log(`  ${chalk.dim('URL:')}    ${d.url || opts.url}`)
+        console.log(`  ${chalk.dim('Events:')} ${(d.events || events).join(', ')}`)
+        if (d.secret) {
+          console.log()
+          console.log(`  ${chalk.bold('Secret:')} ${d.secret}`)
+          console.log(chalk.yellow('  Save this secret -- it will not be shown again.'))
+        }
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+webhooks
+  .command('delete')
+  .description('Delete a webhook')
+  .option('-y, --yes', 'Skip confirmation')
+  .argument('<webhook-id>', 'Webhook ID to delete')
+  .action(async (webhookId, opts) => {
+    const client = getClient()
+
+    if (!opts.yes) {
+      const readline = require('readline')
+      const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+      const answer = await new Promise((resolve) => {
+        rl.question(chalk.yellow(`Delete webhook ${webhookId}? [y/N] `), resolve)
+      })
+      rl.close()
+      if (answer.toLowerCase() !== 'y') {
+        console.error('Aborted.')
+        process.exit(0)
+      }
+    }
+
+    const spinner = ora('Deleting webhook...').start()
+    try {
+      await client.deleteWebhook(webhookId)
+      spinner.stop()
+      console.log(chalk.green(`Webhook ${webhookId} deleted.`))
     } catch (error) {
       spinner.fail(chalk.red(error.message))
       process.exit(1)
