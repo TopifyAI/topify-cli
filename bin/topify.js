@@ -12,7 +12,7 @@ const program = new Command()
 program
   .name('topify')
   .description('Topify AI Visibility CLI - Monitor your brand in AI search results')
-  .version('0.3.0')
+  .version('0.4.0')
 
 // Helper to get authenticated API client
 function getClient() {

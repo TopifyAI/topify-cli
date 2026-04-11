@@ -76,6 +76,35 @@ topify prompts update <id> --content "new text"
 topify prompts delete <id>
 ```
 
+### Actions — AI-recommended improvements
+
+```bash
+topify actions list                    # list action items
+topify actions list --status suggested # filter by status
+topify actions get <id>                # view action details
+topify actions recommend               # trigger new recommendations
+topify actions task <task-id>          # check recommendation progress
+topify actions accept <id>             # accept an action
+topify actions complete <id>           # mark as completed
+topify actions ignore <id> --reason "not relevant"
+topify actions enrich-content <id>     # generate content edits
+topify actions enrich-forum <id>       # generate a forum comment
+topify actions execute <id>            # start execution workflow
+topify actions respond <id> \
+  --workflow-id <wf-id> \
+  --decision approve                   # respond to a checkpoint
+```
+
+### Webhooks
+
+```bash
+topify webhooks list                   # list registered webhooks
+topify webhooks create \
+  --url https://example.com/hook \
+  --events action.checkpoint,action.completed
+topify webhooks delete <id>
+```
+
 ### Other commands
 
 ```bash
