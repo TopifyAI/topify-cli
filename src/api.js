@@ -1,6 +1,7 @@
 const fetch = require('node-fetch')
 
-const BASE_URL = 'https://topify-customer-api-production.up.railway.app/api/public/v1'
+const BASE_URL = process.env.TOPIFY_API_BASE
+  || 'https://topify-customer-api-production.up.railway.app/api/public/v1'
 
 class TopifyAPI {
   constructor(apiKey) {
