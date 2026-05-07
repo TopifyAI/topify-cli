@@ -492,6 +492,107 @@ Examples:
   })
 
 prompts
+  .command('suggest')
+  .description('Generate AI-suggested prompts (background pipeline, fills in over ~30-90s)')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--count <n>', 'Number of prompts to generate (1-50, default = project batch size)')
+  .option('--method <name>', 'Generation method (default keyword_seo_v1)', 'keyword_seo_v1')
+  .option('--idempotency-key <key>', 'Pass the same value to retry safely')
+  .option('--json', 'Output as JSON')
+  .addHelpText('after', `
+Examples:
+  $ topify prompts suggest                          # default count
+  $ topify prompts suggest --count 20
+  $ topify prompts suggest --idempotency-key run-2026-05-07-1
+After running, poll with: topify prompts list  (suggested prompts have promptType=Suggested)`)
+  .action(async (opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Requesting suggested prompts...').start()
+    try {
+      const result = await client.createSuggestedPrompts(projectId, {
+        count: opts.count !== undefined ? parseInt(opts.count, 10) : undefined,
+        generationMethod: opts.method,
+        idempotencyKey: opts.idempotencyKey,
+      })
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`Created ${d.created_count || 0} placeholder prompt(s). Total suggested on project: ${d.total_suggested ?? '?'}.`))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+prompts
+  .command('cleanup-suggested')
+  .description('Remove failed/empty suggested-prompt placeholders')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Cleaning up failed placeholders...').start()
+    try {
+      const result = await client.cleanupSuggestedPrompts(projectId)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`Removed ${d.deleted_count ?? 0} failed/empty placeholder(s).`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+prompts
+  .command('recommend-urls')
+  .description('Generate prompt recommendations for 1-5 target URLs (background pipeline)')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--count <n>', 'How many recommendations to return (1-20, default 5)', '5')
+  .option('--json', 'Output as JSON')
+  .argument('<urls...>', 'Target URLs (1-5)')
+  .addHelpText('after', `
+Examples:
+  $ topify prompts recommend-urls https://example.com/blog/post-1
+  $ topify prompts recommend-urls --count 10 https://acme.com/pricing https://acme.com/features
+
+Existing prompts that already cite these URLs are returned as db_matches; new
+candidates fill in placeholders over ~30-90s. Poll with: topify prompts list`)
+  .action(async (urls, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const count = parseInt(opts.count, 10)
+    const spinner = ora('Requesting URL-driven recommendations...').start()
+    try {
+      const result = await client.createUrlRecommendations(projectId, urls, count)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(
+          `URLs provided: ${d.urls_provided ?? urls.length}. ` +
+          `DB matches: ${d.db_matches ?? 0}. ` +
+          `Placeholders created: ${d.placeholders_created ?? 0}.`
+        ))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+prompts
   .command('delete')
   .description('Delete a prompt')
   .option('-p, --project <id>', 'Project ID')

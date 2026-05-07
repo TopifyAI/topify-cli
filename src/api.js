@@ -172,6 +172,28 @@ class TopifyAPI {
     return this.mutate('DELETE', `/projects/${projectId}/prompts/${promptId}`)
   }
 
+  // Suggested-prompt generation (background pipeline)
+  async createSuggestedPrompts(projectId, opts = {}) {
+    const body = {}
+    if (opts.count !== undefined) body.count = opts.count
+    if (opts.generationMethod) body.generation_method = opts.generationMethod
+    if (opts.idempotencyKey) body.idempotency_key = opts.idempotencyKey
+    if (opts.functionAnalysis) body.function_analysis = opts.functionAnalysis
+    return this.mutate('POST', `/projects/${projectId}/prompts/suggested`, body)
+  }
+
+  async cleanupSuggestedPrompts(projectId) {
+    return this.mutate('POST', `/projects/${projectId}/prompts/suggested/cleanup`, {})
+  }
+
+  // URL-driven prompt recommendations (background pipeline)
+  async createUrlRecommendations(projectId, urls, count = 5) {
+    return this.mutate('POST', `/projects/${projectId}/prompts/url-recommendations`, {
+      urls,
+      count,
+    })
+  }
+
   async getPromptAnalytics(projectId, promptId, opts = {}) {
     return this.request(`/projects/${projectId}/prompts/${promptId}/analytics`, {
       duration_days: opts.days,
