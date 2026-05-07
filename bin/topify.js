@@ -266,6 +266,63 @@ Examples:
   })
 
 competitors
+  .command('track')
+  .description('Track a pending competitor (state: pending -> active)')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<competitor-id>', 'Competitor ID to track')
+  .addHelpText('after', `
+Examples:
+  $ topify competitors track <id>
+Pending competitors come from the AI pipeline auto-detecting brand co-mentions.
+Use 'topify competitors list' to see them.`)
+  .action(async (competitorId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Tracking competitor...').start()
+    try {
+      const result = await client.transitionCompetitorState(projectId, competitorId, 'active')
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`${d.name || competitorId}: ${d.previous_state || '?'} -> ${d.new_state || 'active'}`))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+competitors
+  .command('reject')
+  .description('Reject a pending competitor (state: pending -> inactive)')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<competitor-id>', 'Competitor ID to reject')
+  .action(async (competitorId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Rejecting competitor...').start()
+    try {
+      const result = await client.transitionCompetitorState(projectId, competitorId, 'inactive')
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`${d.name || competitorId}: ${d.previous_state || '?'} -> ${d.new_state || 'inactive'}`))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+competitors
   .command('delete')
   .description('Delete a competitor')
   .option('-p, --project <id>', 'Project ID')
@@ -953,6 +1010,151 @@ webhooks
       await client.deleteWebhook(webhookId)
       spinner.stop()
       console.log(chalk.green(`Webhook ${webhookId} deleted.`))
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+// ============ aliases ============
+const aliases = program
+  .command('aliases')
+  .description('Manage brand aliases (alternate spellings/abbreviations of your brand name)')
+
+aliases
+  .command('list')
+  .description('List brand aliases')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Fetching aliases...').start()
+    try {
+      const result = await client.listAliases(projectId)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        const items = d.aliases || []
+        console.log(chalk.bold(`\n${items.length} Aliases for ${chalk.cyan(d.brand_name || 'brand')} (${d.remaining ?? '?'} of ${d.limit ?? '?'} remaining)\n`))
+        if (items.length === 0) {
+          console.log(chalk.dim('  No aliases. Run `topify aliases add <text>` to add one.'))
+        } else {
+          items.forEach((a, i) => {
+            console.log(`  ${chalk.dim(`${i + 1}.`)} ${a.name} ${chalk.dim(`[${a.match_type}]`)}`)
+          })
+        }
+        console.log()
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+aliases
+  .command('add')
+  .description('Add a brand alias')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--match-type <type>', 'Match type: fuzzy (default) or exact', 'fuzzy')
+  .option('--json', 'Output as JSON')
+  .argument('<alias>', 'The alias text to add')
+  .addHelpText('after', `
+Examples:
+  $ topify aliases add "LadyM"
+  $ topify aliases add "Apple Inc" --match-type exact
+
+Match types:
+  fuzzy   Default. Tolerates capitalization and whitespace differences.
+  exact   Requires whole-word match. Use for brand names that overlap with common words.`)
+  .action(async (alias, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora(`Adding alias "${alias}"...`).start()
+    try {
+      const result = await client.addAlias(projectId, alias, opts.matchType)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`Added "${alias}" [${opts.matchType}]. ${d.aliases?.length || 0}/${d.limit || 20} aliases.`))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+aliases
+  .command('update')
+  .description('Rename an existing alias and/or change its match_type')
+  .option('-p, --project <id>', 'Project ID')
+  .requiredOption('--to <new>', 'New alias text')
+  .option('--match-type <type>', 'Optional new match_type (fuzzy or exact)')
+  .option('--json', 'Output as JSON')
+  .argument('<original>', 'Existing alias text (case-insensitive match)')
+  .addHelpText('after', `
+Examples:
+  $ topify aliases update "LadyM" --to "Lady M"
+  $ topify aliases update "Apple" --to "Apple Inc" --match-type exact`)
+  .action(async (original, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Updating alias...').start()
+    try {
+      const result = await client.updateAlias(projectId, original, opts.to, opts.matchType || null)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`Renamed "${original}" -> "${opts.to}".`))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+aliases
+  .command('delete')
+  .description('Delete a brand alias')
+  .option('-p, --project <id>', 'Project ID')
+  .option('-y, --yes', 'Skip confirmation')
+  .option('--json', 'Output as JSON')
+  .argument('<alias>', 'Alias text to delete (case-insensitive match)')
+  .action(async (alias, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+
+    if (!opts.yes) {
+      const readline = require('readline')
+      const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+      const answer = await new Promise((resolve) => {
+        rl.question(chalk.yellow(`Delete alias "${alias}"? [y/N] `), resolve)
+      })
+      rl.close()
+      if (answer.toLowerCase() !== 'y') {
+        console.error('Aborted.')
+        process.exit(0)
+      }
+    }
+
+    const spinner = ora('Deleting alias...').start()
+    try {
+      const result = await client.deleteAlias(projectId, alias)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`Deleted "${alias}". ${d.aliases?.length || 0} alias(es) remaining.`))
+      }
     } catch (error) {
       spinner.fail(chalk.red(error.message))
       process.exit(1)

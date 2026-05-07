@@ -98,6 +98,51 @@ class TopifyAPI {
     return this.mutate('DELETE', `/projects/${projectId}/competitors/${competitorId}`)
   }
 
+  // Competitor state transitions (track / reject pending suggestions)
+  async transitionCompetitorState(projectId, competitorId, state) {
+    return this.mutate(
+      'PATCH',
+      `/projects/${projectId}/competitors/${competitorId}/state`,
+      { state },
+    )
+  }
+
+  // Brand aliases
+  async listAliases(projectId) {
+    return this.request(`/projects/${projectId}/aliases`)
+  }
+
+  async addAlias(projectId, alias, matchType = 'fuzzy') {
+    return this.mutate('POST', `/projects/${projectId}/aliases`, {
+      alias,
+      match_type: matchType,
+    })
+  }
+
+  async updateAlias(projectId, originalAlias, newAlias, matchType = null) {
+    const body = { original_alias: originalAlias, new_alias: newAlias }
+    if (matchType) body.match_type = matchType
+    return this.mutate('PATCH', `/projects/${projectId}/aliases`, body)
+  }
+
+  async deleteAlias(projectId, alias) {
+    const url = new URL(
+      `${BASE_URL}/projects/${projectId}/aliases?alias=${encodeURIComponent(alias)}`,
+    )
+    const response = await fetch(url.toString(), {
+      method: 'DELETE',
+      headers: {
+        'X-API-Key': this.apiKey,
+        'Content-Type': 'application/json',
+      },
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }))
+      throw new Error(error.detail || error.message || `API error: ${response.status}`)
+    }
+    return response.json()
+  }
+
   // Prompts
   async listPrompts(projectId, opts = {}) {
     return this.request(`/projects/${projectId}/prompts`, {
