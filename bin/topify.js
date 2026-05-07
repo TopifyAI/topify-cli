@@ -3,6 +3,8 @@
 const { Command } = require('commander')
 const chalk = require('chalk')
 const ora = require('ora')
+const fs = require('fs')
+const path = require('path')
 const { TopifyAPI } = require('../src/api')
 const { getApiKey, setApiKey, getDefaultProject, setDefaultProject, clearConfig } = require('../src/config')
 const { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput, slimOverview, slimCompetitors, actionsTable, actionDetail, webhooksTable } = require('../src/format')
@@ -1012,6 +1014,179 @@ actions
       } else {
         console.log(chalk.green(`Checkpoint response sent: ${opts.decision}`))
       }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+actions
+  .command('state')
+  .description('Show lifecycle + valid next-actions for an action (agent-friendly)')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<action-id>', 'Action ID')
+  .action(async (actionId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Fetching state...').start()
+    try {
+      const result = await client.getActionState(projectId, actionId)
+      spinner.stop()
+      const data = result.data || {}
+      if (opts.json) {
+        console.log(jsonOutput(data))
+        return
+      }
+      console.log()
+      console.log(`${chalk.bold('Action:')}      ${data.action_id}`)
+      console.log(`${chalk.bold('Status:')}      ${data.status}`)
+      console.log(`${chalk.bold('Lifecycle:')}   ${data.lifecycle}`)
+      if (data.current_checkpoint) {
+        console.log(`${chalk.bold('Checkpoint:')}  ${data.current_checkpoint}  (${data.workflow_status || '?'})`)
+      }
+      if (Array.isArray(data.ready_artifacts) && data.ready_artifacts.length > 0) {
+        console.log(`${chalk.bold('Artifacts:')}   ${data.ready_artifacts.join(', ')}  ${chalk.dim('(use `topify actions artifact ' + actionId.slice(0, 8) + '... <name>`)')}`)
+      }
+      console.log()
+      console.log(chalk.bold('Next actions:'))
+      const next = data.next_actions || []
+      if (next.length === 0) {
+        console.log(chalk.dim('  (none)'))
+      } else {
+        next.forEach((a, i) => {
+          const lab = a.label || a.name
+          console.log(`  ${chalk.cyan(`${i + 1}.`)} ${lab}`)
+          if (a.http) {
+            console.log(`     ${chalk.dim(a.http.method)} ${chalk.dim(a.http.path)}`)
+          }
+          if (a.requires_input && a.input_field) {
+            console.log(`     ${chalk.yellow('input:')} ${a.input_field}`)
+          }
+        })
+      }
+      console.log()
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+actions
+  .command('artifacts')
+  .description('List named artifacts ready to fetch for an action')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<action-id>', 'Action ID')
+  .action(async (actionId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Listing artifacts...').start()
+    try {
+      const result = await client.listActionArtifacts(projectId, actionId)
+      spinner.stop()
+      const names = result.data?.artifacts || []
+      if (opts.json) {
+        console.log(jsonOutput({ artifacts: names }))
+        return
+      }
+      if (names.length === 0) {
+        console.log(chalk.dim('No artifacts ready yet.'))
+      } else {
+        console.log(chalk.bold(`\nArtifacts ready (${names.length}):`))
+        names.forEach((n) => console.log(`  ${chalk.cyan('-')} ${n}`))
+        console.log(chalk.dim(`\n  Fetch one with: topify actions artifact ${actionId.slice(0, 8)}... <name>`))
+        console.log()
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+// Build a YAML frontmatter block from a flat object. Values are quoted only
+// when they contain characters that would otherwise need escaping. Avoids
+// pulling in a YAML library for this single use case.
+function toYamlFrontmatter(fm) {
+  if (!fm || typeof fm !== 'object') return ''
+  const lines = ['---']
+  for (const [k, v] of Object.entries(fm)) {
+    if (v === null || v === undefined) continue
+    if (Array.isArray(v)) {
+      lines.push(`${k}:`)
+      v.forEach((item) => lines.push(`  - ${JSON.stringify(item)}`))
+    } else if (typeof v === 'string') {
+      // Use double quotes to safely handle most strings; JSON.stringify
+      // handles escaping for us.
+      lines.push(`${k}: ${JSON.stringify(v)}`)
+    } else {
+      lines.push(`${k}: ${JSON.stringify(v)}`)
+    }
+  }
+  lines.push('---', '')
+  return lines.join('\n')
+}
+
+actions
+  .command('artifact')
+  .description('Fetch a single named artifact for an action')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON (default for non-text artifacts)')
+  .option('--save <path>', 'For the article publish kit, write body_markdown + YAML frontmatter to this file')
+  .argument('<action-id>', 'Action ID')
+  .argument('<name>', 'Artifact name (e.g. research, outline, article, thread, comment, edits)')
+  .action(async (actionId, name, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora(`Fetching ${name}...`).start()
+    try {
+      const result = await client.getActionArtifact(projectId, actionId, name)
+      spinner.stop()
+      const data = result.data
+
+      // Special handling for the article publish kit + --save
+      if (name === 'article' && opts.save) {
+        if (!data || typeof data !== 'object') {
+          console.error(chalk.red('No article data returned.'))
+          process.exit(1)
+        }
+        const body = data.body_markdown || ''
+        const fm = toYamlFrontmatter(data.frontmatter || {})
+        const content = fm + body + (body.endsWith('\n') ? '' : '\n')
+
+        const target = path.resolve(opts.save)
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.writeFileSync(target, content, 'utf8')
+
+        console.log(chalk.green(`Wrote ${content.length} bytes to ${target}`))
+        if (data.schema_jsonld) {
+          console.log(chalk.dim('  schema_jsonld is NOT inlined into the file. Embed it as <script type="application/ld+json"> in your page <head>:'))
+          console.log(chalk.dim('  ' + JSON.stringify(data.schema_jsonld).slice(0, 200) + (JSON.stringify(data.schema_jsonld).length > 200 ? '...' : '')))
+        }
+        if (data.publish_instructions) {
+          console.log()
+          console.log(chalk.bold('Next steps:'))
+          console.log(data.publish_instructions)
+        }
+        return
+      }
+
+      if (opts.json || (data && typeof data === 'object' && !data.body_markdown)) {
+        console.log(jsonOutput(data))
+        return
+      }
+
+      // Convenient text fallthrough for the article kit when not saving
+      if (name === 'article' && data && data.body_markdown) {
+        console.log(chalk.bold(`# ${data.title || ''}`))
+        if (data.slug) console.log(chalk.dim(`slug: ${data.slug}`))
+        if (data.suggested_file_path) console.log(chalk.dim(`suggested path: ${data.suggested_file_path}`))
+        console.log()
+        console.log(data.body_markdown)
+        return
+      }
+
+      console.log(jsonOutput(data))
     } catch (error) {
       spinner.fail(chalk.red(error.message))
       process.exit(1)

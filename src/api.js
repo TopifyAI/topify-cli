@@ -288,6 +288,19 @@ class TopifyAPI {
     return this.mutate('POST', `/projects/${projectId}/actions/${actionId}/execute/respond`, body)
   }
 
+  // Agent-facing read endpoints
+  async getActionState(projectId, actionId) {
+    return this.request(`/projects/${projectId}/actions/${actionId}/state`)
+  }
+
+  async listActionArtifacts(projectId, actionId) {
+    return this.request(`/projects/${projectId}/actions/${actionId}/artifacts`)
+  }
+
+  async getActionArtifact(projectId, actionId, name) {
+    return this.request(`/projects/${projectId}/actions/${actionId}/artifacts/${encodeURIComponent(name)}`)
+  }
+
   // Webhooks
   async listWebhooks() {
     return this.request('/webhooks')
