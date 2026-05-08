@@ -1,6 +1,6 @@
 {
-  "name": "@topify/cli",
-  "version": "0.1.0",
+  "name": "topify-cli",
+  "version": "0.5.0",
   "description": "Topify AI Visibility CLI - Monitor your brand's presence in AI search results",
   "bin": {
     "topify": "./bin/topify.js"
