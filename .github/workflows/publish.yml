@@ -15,39 +15,93 @@ permissions:
   contents: read
   id-token: write
 
+# Serialize publish runs so a fast follow-up push can't race with one already
+# uploading to npm. cancel-in-progress: false because aborting mid-publish
+# could leave an orphaned tarball.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Require manual approval through the `npm-publish` GitHub Environment
+    # before any code in this job runs. This means a poisoned package.json
+    # merged to main can NOT publish without an approver clicking through.
+    # Configure the environment + reviewers under repo Settings -> Environments.
+    environment: npm-publish
     steps:
-      - uses: actions/checkout@v4
+      # Pin actions by full SHA so a tag retag can't smuggle malicious code
+      # into our publish job. Renovate / dependabot will keep these fresh.
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11   # v4.1.1
 
-      - uses: actions/setup-node@v4
+      - name: Set up Node 20 + npm registry
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8   # v4.0.2
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      # If package.json version is already on npm, skip — re-merging an
-      # unchanged version would otherwise fail the action with a 409.
+      # Skip if package.json version is already on npm. We branch on the
+      # specific E404 stderr signal so transient registry / network failures
+      # are fatal instead of silently re-publishing.
       - name: Check if version is new
         id: check
         run: |
+          set -uo pipefail
           PKG_NAME=$(node -p "require('./package.json').name")
           PKG_VERSION=$(node -p "require('./package.json').version")
           echo "Package: $PKG_NAME@$PKG_VERSION"
-          if npm view "$PKG_NAME@$PKG_VERSION" version >/dev/null 2>&1; then
+
+          STDERR=$(mktemp)
+          if npm view "$PKG_NAME@$PKG_VERSION" version 2>"$STDERR" >/dev/null; then
             echo "Version $PKG_VERSION is already published — skipping."
             echo "should_publish=false" >> "$GITHUB_OUTPUT"
           else
-            echo "Version $PKG_VERSION is new — will publish."
-            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            if grep -q "E404\|404 Not Found\|is not in this registry" "$STDERR"; then
+              echo "Version $PKG_VERSION is new — will publish."
+              echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::error::Could not determine publish status. npm view failed for non-404 reason:" >&2
+              cat "$STDERR" >&2
+              exit 1
+            fi
           fi
 
+      # Install with --ignore-scripts so a malicious dependency's lifecycle
+      # hooks (preinstall / install / postinstall) cannot run in the same
+      # job that holds the OIDC publish token.
       - name: Install dependencies
         if: steps.check.outputs.should_publish == 'true'
-        run: npm ci
+        run: npm ci --ignore-scripts
+
+      # Audit prod deps for known criticals. Doesn't run lifecycle scripts.
+      - name: Audit production dependencies
+        if: steps.check.outputs.should_publish == 'true'
+        run: npm audit --omit=dev --audit-level=high
+
+      # Final dry-run gate logs the file list that would be published.
+      # Anything in the tarball outside bin/, src/, README.md fails the build.
+      - name: Verify tarball contents
+        if: steps.check.outputs.should_publish == 'true'
+        run: |
+          set -euo pipefail
+          npm publish --dry-run --json > /tmp/pack.json
+          BAD=$(node -p "
+            const list = require('/tmp/pack.json').files.map(f => f.path);
+            const allow = /^(bin\\/|src\\/|README\\.md$|package\\.json$|LICENSE$)/;
+            list.filter(p => !allow.test(p)).join('\\n');
+          ")
+          if [ -n "$BAD" ]; then
+            echo "::error::Tarball would ship unexpected files:" >&2
+            echo "$BAD" >&2
+            exit 1
+          fi
 
       # --provenance adds a signed supply-chain attestation linking the
       # tarball back to this exact workflow run + commit. Free with OIDC.
+      # --ignore-scripts here is belt-and-suspenders against malicious
+      # prepublishOnly / postpublish hooks landing on main.
       - name: Publish to npm
         if: steps.check.outputs.should_publish == 'true'
-        run: npm publish --provenance
+        run: npm publish --provenance --ignore-scripts

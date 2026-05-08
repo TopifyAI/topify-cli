@@ -27,5 +27,10 @@
     "conf": "^10.2.0",
     "node-fetch": "^2.7.0",
     "ora": "^5.4.1"
-  }
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ]
 }
