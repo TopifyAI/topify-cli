@@ -3,6 +3,8 @@
 const { Command } = require('commander')
 const chalk = require('chalk')
 const ora = require('ora')
+const fs = require('fs')
+const path = require('path')
 const { TopifyAPI } = require('../src/api')
 const { getApiKey, setApiKey, getDefaultProject, setDefaultProject, clearConfig } = require('../src/config')
 const { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput, slimOverview, slimCompetitors, actionsTable, actionDetail, webhooksTable } = require('../src/format')
@@ -313,6 +315,63 @@ Examples:
   })
 
 competitors
+  .command('track')
+  .description('Track a pending competitor (state: pending -> active)')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<competitor-id>', 'Competitor ID to track')
+  .addHelpText('after', `
+Examples:
+  $ topify competitors track <id>
+Pending competitors come from the AI pipeline auto-detecting brand co-mentions.
+Use 'topify competitors list' to see them.`)
+  .action(async (competitorId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Tracking competitor...').start()
+    try {
+      const result = await client.transitionCompetitorState(projectId, competitorId, 'active')
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`${d.name || competitorId}: ${d.previous_state || '?'} -> ${d.new_state || 'active'}`))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+competitors
+  .command('reject')
+  .description('Reject a pending competitor (state: pending -> inactive)')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<competitor-id>', 'Competitor ID to reject')
+  .action(async (competitorId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Rejecting competitor...').start()
+    try {
+      const result = await client.transitionCompetitorState(projectId, competitorId, 'inactive')
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`${d.name || competitorId}: ${d.previous_state || '?'} -> ${d.new_state || 'inactive'}`))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+competitors
   .command('delete')
   .description('Delete a competitor')
   .option('-p, --project <id>', 'Project ID')
@@ -474,6 +533,107 @@ Examples:
         const p = result.data || {}
         console.log(`  ${chalk.dim('ID:')} ${p.id || promptId}`)
         if (p.content) console.log(`  ${chalk.dim('Content:')} ${p.content}`)
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+prompts
+  .command('suggest')
+  .description('Generate AI-suggested prompts (background pipeline, fills in over ~30-90s)')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--count <n>', 'Number of prompts to generate (1-50, default = project batch size)')
+  .option('--method <name>', 'Generation method (default keyword_seo_v1)', 'keyword_seo_v1')
+  .option('--idempotency-key <key>', 'Pass the same value to retry safely')
+  .option('--json', 'Output as JSON')
+  .addHelpText('after', `
+Examples:
+  $ topify prompts suggest                          # default count
+  $ topify prompts suggest --count 20
+  $ topify prompts suggest --idempotency-key run-2026-05-07-1
+After running, poll with: topify prompts list  (suggested prompts have promptType=Suggested)`)
+  .action(async (opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Requesting suggested prompts...').start()
+    try {
+      const result = await client.createSuggestedPrompts(projectId, {
+        count: opts.count !== undefined ? parseInt(opts.count, 10) : undefined,
+        generationMethod: opts.method,
+        idempotencyKey: opts.idempotencyKey,
+      })
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`Created ${d.created_count || 0} placeholder prompt(s). Total suggested on project: ${d.total_suggested ?? '?'}.`))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+prompts
+  .command('cleanup-suggested')
+  .description('Remove failed/empty suggested-prompt placeholders')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Cleaning up failed placeholders...').start()
+    try {
+      const result = await client.cleanupSuggestedPrompts(projectId)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`Removed ${d.deleted_count ?? 0} failed/empty placeholder(s).`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+prompts
+  .command('recommend-urls')
+  .description('Generate prompt recommendations for 1-5 target URLs (background pipeline)')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--count <n>', 'How many recommendations to return (1-20, default 5)', '5')
+  .option('--json', 'Output as JSON')
+  .argument('<urls...>', 'Target URLs (1-5)')
+  .addHelpText('after', `
+Examples:
+  $ topify prompts recommend-urls https://example.com/blog/post-1
+  $ topify prompts recommend-urls --count 10 https://acme.com/pricing https://acme.com/features
+
+Existing prompts that already cite these URLs are returned as db_matches; new
+candidates fill in placeholders over ~30-90s. Poll with: topify prompts list`)
+  .action(async (urls, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const count = parseInt(opts.count, 10)
+    const spinner = ora('Requesting URL-driven recommendations...').start()
+    try {
+      const result = await client.createUrlRecommendations(projectId, urls, count)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(
+          `URLs provided: ${d.urls_provided ?? urls.length}. ` +
+          `DB matches: ${d.db_matches ?? 0}. ` +
+          `Placeholders created: ${d.placeholders_created ?? 0}.`
+        ))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
       }
     } catch (error) {
       spinner.fail(chalk.red(error.message))
@@ -907,6 +1067,179 @@ actions
     }
   })
 
+actions
+  .command('state')
+  .description('Show lifecycle + valid next-actions for an action (agent-friendly)')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<action-id>', 'Action ID')
+  .action(async (actionId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Fetching state...').start()
+    try {
+      const result = await client.getActionState(projectId, actionId)
+      spinner.stop()
+      const data = result.data || {}
+      if (opts.json) {
+        console.log(jsonOutput(data))
+        return
+      }
+      console.log()
+      console.log(`${chalk.bold('Action:')}      ${data.action_id}`)
+      console.log(`${chalk.bold('Status:')}      ${data.status}`)
+      console.log(`${chalk.bold('Lifecycle:')}   ${data.lifecycle}`)
+      if (data.current_checkpoint) {
+        console.log(`${chalk.bold('Checkpoint:')}  ${data.current_checkpoint}  (${data.workflow_status || '?'})`)
+      }
+      if (Array.isArray(data.ready_artifacts) && data.ready_artifacts.length > 0) {
+        console.log(`${chalk.bold('Artifacts:')}   ${data.ready_artifacts.join(', ')}  ${chalk.dim('(use `topify actions artifact ' + actionId.slice(0, 8) + '... <name>`)')}`)
+      }
+      console.log()
+      console.log(chalk.bold('Next actions:'))
+      const next = data.next_actions || []
+      if (next.length === 0) {
+        console.log(chalk.dim('  (none)'))
+      } else {
+        next.forEach((a, i) => {
+          const lab = a.label || a.name
+          console.log(`  ${chalk.cyan(`${i + 1}.`)} ${lab}`)
+          if (a.http) {
+            console.log(`     ${chalk.dim(a.http.method)} ${chalk.dim(a.http.path)}`)
+          }
+          if (a.requires_input && a.input_field) {
+            console.log(`     ${chalk.yellow('input:')} ${a.input_field}`)
+          }
+        })
+      }
+      console.log()
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+actions
+  .command('artifacts')
+  .description('List named artifacts ready to fetch for an action')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .argument('<action-id>', 'Action ID')
+  .action(async (actionId, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Listing artifacts...').start()
+    try {
+      const result = await client.listActionArtifacts(projectId, actionId)
+      spinner.stop()
+      const names = result.data?.artifacts || []
+      if (opts.json) {
+        console.log(jsonOutput({ artifacts: names }))
+        return
+      }
+      if (names.length === 0) {
+        console.log(chalk.dim('No artifacts ready yet.'))
+      } else {
+        console.log(chalk.bold(`\nArtifacts ready (${names.length}):`))
+        names.forEach((n) => console.log(`  ${chalk.cyan('-')} ${n}`))
+        console.log(chalk.dim(`\n  Fetch one with: topify actions artifact ${actionId.slice(0, 8)}... <name>`))
+        console.log()
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+// Build a YAML frontmatter block from a flat object. Values are quoted only
+// when they contain characters that would otherwise need escaping. Avoids
+// pulling in a YAML library for this single use case.
+function toYamlFrontmatter(fm) {
+  if (!fm || typeof fm !== 'object') return ''
+  const lines = ['---']
+  for (const [k, v] of Object.entries(fm)) {
+    if (v === null || v === undefined) continue
+    if (Array.isArray(v)) {
+      lines.push(`${k}:`)
+      v.forEach((item) => lines.push(`  - ${JSON.stringify(item)}`))
+    } else if (typeof v === 'string') {
+      // Use double quotes to safely handle most strings; JSON.stringify
+      // handles escaping for us.
+      lines.push(`${k}: ${JSON.stringify(v)}`)
+    } else {
+      lines.push(`${k}: ${JSON.stringify(v)}`)
+    }
+  }
+  lines.push('---', '')
+  return lines.join('\n')
+}
+
+actions
+  .command('artifact')
+  .description('Fetch a single named artifact for an action')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON (default for non-text artifacts)')
+  .option('--save <path>', 'For the article publish kit, write body_markdown + YAML frontmatter to this file')
+  .argument('<action-id>', 'Action ID')
+  .argument('<name>', 'Artifact name (e.g. research, outline, article, thread, comment, edits)')
+  .action(async (actionId, name, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora(`Fetching ${name}...`).start()
+    try {
+      const result = await client.getActionArtifact(projectId, actionId, name)
+      spinner.stop()
+      const data = result.data
+
+      // Special handling for the article publish kit + --save
+      if (name === 'article' && opts.save) {
+        if (!data || typeof data !== 'object') {
+          console.error(chalk.red('No article data returned.'))
+          process.exit(1)
+        }
+        const body = data.body_markdown || ''
+        const fm = toYamlFrontmatter(data.frontmatter || {})
+        const content = fm + body + (body.endsWith('\n') ? '' : '\n')
+
+        const target = path.resolve(opts.save)
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.writeFileSync(target, content, 'utf8')
+
+        console.log(chalk.green(`Wrote ${content.length} bytes to ${target}`))
+        if (data.schema_jsonld) {
+          console.log(chalk.dim('  schema_jsonld is NOT inlined into the file. Embed it as <script type="application/ld+json"> in your page <head>:'))
+          console.log(chalk.dim('  ' + JSON.stringify(data.schema_jsonld).slice(0, 200) + (JSON.stringify(data.schema_jsonld).length > 200 ? '...' : '')))
+        }
+        if (data.publish_instructions) {
+          console.log()
+          console.log(chalk.bold('Next steps:'))
+          console.log(data.publish_instructions)
+        }
+        return
+      }
+
+      if (opts.json || (data && typeof data === 'object' && !data.body_markdown)) {
+        console.log(jsonOutput(data))
+        return
+      }
+
+      // Convenient text fallthrough for the article kit when not saving
+      if (name === 'article' && data && data.body_markdown) {
+        console.log(chalk.bold(`# ${data.title || ''}`))
+        if (data.slug) console.log(chalk.dim(`slug: ${data.slug}`))
+        if (data.suggested_file_path) console.log(chalk.dim(`suggested path: ${data.suggested_file_path}`))
+        console.log()
+        console.log(data.body_markdown)
+        return
+      }
+
+      console.log(jsonOutput(data))
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
 // ============ webhooks ============
 const webhooks = program
   .command('webhooks')
@@ -1000,6 +1333,151 @@ webhooks
       await client.deleteWebhook(webhookId)
       spinner.stop()
       console.log(chalk.green(`Webhook ${webhookId} deleted.`))
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+// ============ aliases ============
+const aliases = program
+  .command('aliases')
+  .description('Manage brand aliases (alternate spellings/abbreviations of your brand name)')
+
+aliases
+  .command('list')
+  .description('List brand aliases')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Fetching aliases...').start()
+    try {
+      const result = await client.listAliases(projectId)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        const items = d.aliases || []
+        console.log(chalk.bold(`\n${items.length} Aliases for ${chalk.cyan(d.brand_name || 'brand')} (${d.remaining ?? '?'} of ${d.limit ?? '?'} remaining)\n`))
+        if (items.length === 0) {
+          console.log(chalk.dim('  No aliases. Run `topify aliases add <text>` to add one.'))
+        } else {
+          items.forEach((a, i) => {
+            console.log(`  ${chalk.dim(`${i + 1}.`)} ${a.name} ${chalk.dim(`[${a.match_type}]`)}`)
+          })
+        }
+        console.log()
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+aliases
+  .command('add')
+  .description('Add a brand alias')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--match-type <type>', 'Match type: fuzzy (default) or exact', 'fuzzy')
+  .option('--json', 'Output as JSON')
+  .argument('<alias>', 'The alias text to add')
+  .addHelpText('after', `
+Examples:
+  $ topify aliases add "LadyM"
+  $ topify aliases add "Apple Inc" --match-type exact
+
+Match types:
+  fuzzy   Default. Tolerates capitalization and whitespace differences.
+  exact   Requires whole-word match. Use for brand names that overlap with common words.`)
+  .action(async (alias, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora(`Adding alias "${alias}"...`).start()
+    try {
+      const result = await client.addAlias(projectId, alias, opts.matchType)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`Added "${alias}" [${opts.matchType}]. ${d.aliases?.length || 0}/${d.limit || 20} aliases.`))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+aliases
+  .command('update')
+  .description('Rename an existing alias and/or change its match_type')
+  .option('-p, --project <id>', 'Project ID')
+  .requiredOption('--to <new>', 'New alias text')
+  .option('--match-type <type>', 'Optional new match_type (fuzzy or exact)')
+  .option('--json', 'Output as JSON')
+  .argument('<original>', 'Existing alias text (case-insensitive match)')
+  .addHelpText('after', `
+Examples:
+  $ topify aliases update "LadyM" --to "Lady M"
+  $ topify aliases update "Apple" --to "Apple Inc" --match-type exact`)
+  .action(async (original, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Updating alias...').start()
+    try {
+      const result = await client.updateAlias(projectId, original, opts.to, opts.matchType || null)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`Renamed "${original}" -> "${opts.to}".`))
+        if (d.message) console.log(chalk.dim(`  ${d.message}`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+aliases
+  .command('delete')
+  .description('Delete a brand alias')
+  .option('-p, --project <id>', 'Project ID')
+  .option('-y, --yes', 'Skip confirmation')
+  .option('--json', 'Output as JSON')
+  .argument('<alias>', 'Alias text to delete (case-insensitive match)')
+  .action(async (alias, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+
+    if (!opts.yes) {
+      const readline = require('readline')
+      const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+      const answer = await new Promise((resolve) => {
+        rl.question(chalk.yellow(`Delete alias "${alias}"? [y/N] `), resolve)
+      })
+      rl.close()
+      if (answer.toLowerCase() !== 'y') {
+        console.error('Aborted.')
+        process.exit(0)
+      }
+    }
+
+    const spinner = ora('Deleting alias...').start()
+    try {
+      const result = await client.deleteAlias(projectId, alias)
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(result.data))
+      } else {
+        const d = result.data || {}
+        console.log(chalk.green(`Deleted "${alias}". ${d.aliases?.length || 0} alias(es) remaining.`))
+      }
     } catch (error) {
       spinner.fail(chalk.red(error.message))
       process.exit(1)

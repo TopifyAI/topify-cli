@@ -1,6 +1,7 @@
 const fetch = require('node-fetch')
 
-const BASE_URL = 'https://topify-customer-api-production.up.railway.app/api/public/v1'
+const BASE_URL = process.env.TOPIFY_API_BASE
+  || 'https://topify-customer-api-production.up.railway.app/api/public/v1'
 
 class TopifyAPI {
   constructor(apiKey) {
@@ -105,6 +106,51 @@ class TopifyAPI {
     return this.mutate('DELETE', `/projects/${projectId}/competitors/${competitorId}`)
   }
 
+  // Competitor state transitions (track / reject pending suggestions)
+  async transitionCompetitorState(projectId, competitorId, state) {
+    return this.mutate(
+      'PATCH',
+      `/projects/${projectId}/competitors/${competitorId}/state`,
+      { state },
+    )
+  }
+
+  // Brand aliases
+  async listAliases(projectId) {
+    return this.request(`/projects/${projectId}/aliases`)
+  }
+
+  async addAlias(projectId, alias, matchType = 'fuzzy') {
+    return this.mutate('POST', `/projects/${projectId}/aliases`, {
+      alias,
+      match_type: matchType,
+    })
+  }
+
+  async updateAlias(projectId, originalAlias, newAlias, matchType = null) {
+    const body = { original_alias: originalAlias, new_alias: newAlias }
+    if (matchType) body.match_type = matchType
+    return this.mutate('PATCH', `/projects/${projectId}/aliases`, body)
+  }
+
+  async deleteAlias(projectId, alias) {
+    const url = new URL(
+      `${BASE_URL}/projects/${projectId}/aliases?alias=${encodeURIComponent(alias)}`,
+    )
+    const response = await fetch(url.toString(), {
+      method: 'DELETE',
+      headers: {
+        'X-API-Key': this.apiKey,
+        'Content-Type': 'application/json',
+      },
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }))
+      throw new Error(error.detail || error.message || `API error: ${response.status}`)
+    }
+    return response.json()
+  }
+
   // Prompts
   async listPrompts(projectId, opts = {}) {
     return this.request(`/projects/${projectId}/prompts`, {
@@ -132,6 +178,28 @@ class TopifyAPI {
 
   async deletePrompt(projectId, promptId) {
     return this.mutate('DELETE', `/projects/${projectId}/prompts/${promptId}`)
+  }
+
+  // Suggested-prompt generation (background pipeline)
+  async createSuggestedPrompts(projectId, opts = {}) {
+    const body = {}
+    if (opts.count !== undefined) body.count = opts.count
+    if (opts.generationMethod) body.generation_method = opts.generationMethod
+    if (opts.idempotencyKey) body.idempotency_key = opts.idempotencyKey
+    if (opts.functionAnalysis) body.function_analysis = opts.functionAnalysis
+    return this.mutate('POST', `/projects/${projectId}/prompts/suggested`, body)
+  }
+
+  async cleanupSuggestedPrompts(projectId) {
+    return this.mutate('POST', `/projects/${projectId}/prompts/suggested/cleanup`, {})
+  }
+
+  // URL-driven prompt recommendations (background pipeline)
+  async createUrlRecommendations(projectId, urls, count = 5) {
+    return this.mutate('POST', `/projects/${projectId}/prompts/url-recommendations`, {
+      urls,
+      count,
+    })
   }
 
   async getPromptAnalytics(projectId, promptId, opts = {}) {
@@ -226,6 +294,19 @@ class TopifyAPI {
 
   async respondToCheckpoint(projectId, actionId, body) {
     return this.mutate('POST', `/projects/${projectId}/actions/${actionId}/execute/respond`, body)
+  }
+
+  // Agent-facing read endpoints
+  async getActionState(projectId, actionId) {
+    return this.request(`/projects/${projectId}/actions/${actionId}/state`)
+  }
+
+  async listActionArtifacts(projectId, actionId) {
+    return this.request(`/projects/${projectId}/actions/${actionId}/artifacts`)
+  }
+
+  async getActionArtifact(projectId, actionId, name) {
+    return this.request(`/projects/${projectId}/actions/${actionId}/artifacts/${encodeURIComponent(name)}`)
   }
 
   // Webhooks
