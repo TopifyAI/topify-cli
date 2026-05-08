@@ -1,0 +1,53 @@
+name: Publish to npm
+
+# Fires on every push to main and on manual dispatch from the Actions tab.
+# We DON'T fire on PRs — PR runs from forks can't access npm credentials and
+# would only ever run dry-run anyway.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# OIDC trusted-publishing needs id-token write. contents read is the default
+# but we declare it explicitly because permissions becomes restrictive when
+# id-token is set.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      # If package.json version is already on npm, skip — re-merging an
+      # unchanged version would otherwise fail the action with a 409.
+      - name: Check if version is new
+        id: check
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "Package: $PKG_NAME@$PKG_VERSION"
+          if npm view "$PKG_NAME@$PKG_VERSION" version >/dev/null 2>&1; then
+            echo "Version $PKG_VERSION is already published — skipping."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version $PKG_VERSION is new — will publish."
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.check.outputs.should_publish == 'true'
+        run: npm ci
+
+      # --provenance adds a signed supply-chain attestation linking the
+      # tarball back to this exact workflow run + commit. Free with OIDC.
+      - name: Publish to npm
+        if: steps.check.outputs.should_publish == 'true'
+        run: npm publish --provenance
