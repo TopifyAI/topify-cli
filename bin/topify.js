@@ -7,14 +7,14 @@ const fs = require('fs')
 const path = require('path')
 const { TopifyAPI } = require('../src/api')
 const { getApiKey, setApiKey, getDefaultProject, setDefaultProject, clearConfig } = require('../src/config')
-const { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput, slimOverview, slimCompetitors, actionsTable, actionDetail, webhooksTable } = require('../src/format')
+const { projectsTable, competitorsTable, overviewTable, sourcesTable, recordingsTable, jsonOutput, slimOverview, slimCompetitors, actionsTable, actionDetail, webhooksTable, promptInspectSummary } = require('../src/format')
 
 const program = new Command()
 
 program
   .name('topify')
   .description('Topify AI Visibility CLI - Monitor your brand in AI search results')
-  .version('0.4.0')
+  .version(require('../package.json').version)
 
 // Helper to get authenticated API client
 function getClient() {
@@ -35,6 +35,18 @@ function resolveProject(opts) {
     process.exit(1)
   }
   return projectId
+}
+
+function parseIncludeList(value, allowed, defaults) {
+  const raw = (value || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean)
+  const validTokens = [...allowed, 'all']
+  const invalid = raw.filter((item) => !validTokens.includes(item))
+  if (invalid.length > 0) {
+    throw new Error(`Unknown include value(s): ${invalid.join(', ')}. Allowed: ${allowed.join(', ')}, all`)
+  }
+  const requested = raw.length ? raw : defaults
+  const expanded = requested.includes('all') ? allowed : requested
+  return [...new Set(expanded)]
 }
 
 // ============ config ============
@@ -428,23 +440,116 @@ prompts
     const projectId = resolveProject(opts)
     const spinner = ora('Fetching prompts...').start()
     try {
-      const result = await client.listPrompts(projectId, {
-        page: opts.page,
-        pageSize: opts.pageSize,
-      })
+      const result = await client.listPrompts(projectId)
       spinner.stop()
 
+      const allPrompts = result.data?.prompts || (Array.isArray(result.data) ? result.data : result.data?.items || [])
+      const page = Math.max(1, parseInt(opts.page, 10) || 1)
+      const pageSize = Math.max(1, parseInt(opts.pageSize, 10) || 50)
+      const offset = (page - 1) * pageSize
+      const pageItems = allPrompts.slice(offset, offset + pageSize)
+
       if (opts.json) {
-        console.log(jsonOutput(result.data))
-      } else {
-        const items = result.data?.items || result.data || []
-        console.log(chalk.bold(`\n${items.length} Prompts\n`))
-        items.slice(0, 30).forEach((p, i) => {
-          console.log(`  ${chalk.dim(i + 1 + '.')} ${p.content || p.keyword || '—'}`)
-        })
-        if (items.length > 30) {
-          console.log(chalk.dim(`\n  ... and ${items.length - 30} more. Use --json for full output.`))
+        if (result.data?.prompts) {
+          console.log(jsonOutput({
+            ...result.data,
+            page,
+            page_size: pageSize,
+            prompts: pageItems,
+          }))
+        } else {
+          console.log(jsonOutput(pageItems))
         }
+      } else {
+        console.log(chalk.bold(`\nPrompts (${allPrompts.length} total, page ${page})\n`))
+        pageItems.forEach((p, i) => {
+          const rowNumber = offset + i + 1
+          console.log(`  ${chalk.dim(rowNumber + '.')} ${chalk.cyan(p.id || p.prompt_id || '')} ${p.content || p.keyword || '-'}`)
+        })
+        if (offset + pageItems.length < allPrompts.length) {
+          console.log(chalk.dim(`\nShowing ${pageItems.length} of ${allPrompts.length}. Next page: topify prompts list --page ${page + 1}`))
+        }
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+prompts
+  .command('inspect')
+  .description('Inspect one prompt with analytics, citation evidence, and optional chats')
+  .option('-p, --project <id>', 'Project ID')
+  .option('-d, --days <n>', 'Lookback days', '30')
+  .option('--from <date>', 'Start date (YYYY-MM-DD)')
+  .option('--to <date>', 'End date (YYYY-MM-DD)')
+  .option('--providers <list>', 'Filter providers (required when including chats)')
+  .option('--include <list>', 'Evidence to fetch: analytics,domains,urls,chats,all', 'analytics,domains,urls')
+  .option('--json', 'Output as JSON')
+  .argument('<prompt-id>', 'Prompt ID to inspect')
+  .addHelpText('after', `
+Examples:
+  $ topify prompts inspect <prompt-id>
+  $ topify prompts inspect <prompt-id> --days 30 --json
+  $ topify prompts inspect <prompt-id> --include analytics,chats,domains,urls --providers chatgpt`)
+  .action(async (promptId, opts) => {
+    let includes
+    try {
+      includes = parseIncludeList(opts.include, ['analytics', 'domains', 'urls', 'chats'], ['analytics', 'domains', 'urls'])
+    } catch (error) {
+      console.error(chalk.red(error.message))
+      process.exit(1)
+    }
+
+    if (includes.includes('chats') && !(opts.providers || '').trim()) {
+      console.error(chalk.red('Including chats requires --providers <list> to keep full-response payloads bounded.'))
+      console.error(chalk.dim('Example: topify prompts inspect <prompt-id> --include chats --providers chatgpt --days 7'))
+      process.exit(1)
+    }
+
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const window = {
+      days: opts.days,
+      from: opts.from,
+      to: opts.to,
+      providers: opts.providers,
+    }
+
+    const spinner = ora('Inspecting prompt...').start()
+    try {
+      const requests = [
+        ['prompt', client.getPrompt(projectId, promptId, window)],
+      ]
+      if (includes.includes('analytics')) requests.push(['analytics', client.getPromptAnalytics(projectId, promptId, window)])
+      if (includes.includes('domains')) requests.push(['domains', client.getPromptDomains(projectId, promptId, window)])
+      if (includes.includes('urls')) requests.push(['urls', client.getPromptUrls(projectId, promptId, window)])
+      if (includes.includes('chats')) requests.push(['chats', client.getPromptChats(projectId, promptId, window)])
+
+      const pairs = await Promise.all(requests.map(async ([key, promise]) => {
+        const result = await promise
+        return [key, result.data]
+      }))
+
+      const data = Object.fromEntries(pairs)
+      const payload = {
+        project_id: projectId,
+        prompt_id: promptId,
+        window: {
+          duration_days: opts.days ? parseInt(opts.days, 10) : undefined,
+          date_from: opts.from,
+          date_to: opts.to,
+          providers: opts.providers,
+        },
+        includes,
+        ...data,
+      }
+
+      spinner.stop()
+      if (opts.json) {
+        console.log(jsonOutput(payload))
+      } else {
+        console.log(promptInspectSummary(payload))
       }
     } catch (error) {
       spinner.fail(chalk.red(error.message))
@@ -614,8 +719,8 @@ Examples:
   $ topify prompts recommend-urls https://example.com/blog/post-1
   $ topify prompts recommend-urls --count 10 https://acme.com/pricing https://acme.com/features
 
-Existing prompts that already cite these URLs are returned as db_matches; new
-candidates fill in placeholders over ~30-90s. Poll with: topify prompts list`)
+Existing prompt DB-match lookup and new recommendation generation run in the
+background. Poll with: topify prompts list`)
   .action(async (urls, opts) => {
     const client = getClient()
     const projectId = resolveProject(opts)
@@ -628,10 +733,16 @@ candidates fill in placeholders over ~30-90s. Poll with: topify prompts list`)
         console.log(jsonOutput(result.data))
       } else {
         const d = result.data || {}
+        const urlsProvided = d.urls_provided ?? d.urlsProvided ?? urls.length
+        const placeholdersCreated = d.placeholders_created ?? d.placeholdersCreated ?? 0
+        const dbMatches = d.db_matches ?? d.dbMatches
+        const dbMatchesText = /DB-match lookup|background DB-match/i.test(d.message || '')
+          ? 'queued'
+          : (dbMatches ?? 0)
         console.log(chalk.green(
-          `URLs provided: ${d.urls_provided ?? urls.length}. ` +
-          `DB matches: ${d.db_matches ?? 0}. ` +
-          `Placeholders created: ${d.placeholders_created ?? 0}.`
+          `URLs provided: ${urlsProvided}. ` +
+          `DB matches: ${dbMatchesText}. ` +
+          `Placeholders created: ${placeholdersCreated}.`
         ))
         if (d.message) console.log(chalk.dim(`  ${d.message}`))
       }
@@ -641,14 +752,94 @@ candidates fill in placeholders over ~30-90s. Poll with: topify prompts list`)
     }
   })
 
-prompts
-  .command('delete')
-  .description('Delete a prompt')
+// ============ recordings ============
+const recordings = program
+  .command('recording')
+  .alias('recordings')
+  .description('Manage recorded URLs for prompt discovery')
+
+recordings
+  .command('list')
+  .description('List recorded URLs')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Fetching recordings...').start()
+    try {
+      const result = await client.listRecordings(projectId)
+      spinner.stop()
+
+      const data = result.data || {}
+      const urls = data.urls || []
+      if (opts.json) {
+        console.log(jsonOutput(data))
+        return
+      }
+
+      console.log(chalk.bold(`\nRecorded URLs (${urls.length})\n`))
+      if (urls.length === 0) {
+        console.log(chalk.dim('  No recorded URLs yet. Add one with: topify recording add <url>'))
+      } else {
+        console.log(recordingsTable(data))
+        if (urls.length > 20) {
+          console.log(chalk.dim(`\nShowing top 20 of ${urls.length}. Use --json for full output.`))
+        }
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+recordings
+  .command('add')
+  .description('Add one or more URLs to recording')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--title <title>', 'Optional title when adding a single URL')
+  .option('--json', 'Output as JSON')
+  .argument('<urls...>', 'URLs to record')
+  .addHelpText('after', `
+Examples:
+  $ topify recording add https://example.com/blog/post
+  $ topify recording add https://example.com/blog/post --title "Launch post"`)
+  .action(async (urls, opts) => {
+    if (opts.title && urls.length !== 1) {
+      console.error(chalk.red('--title can only be used when adding a single URL.'))
+      process.exit(1)
+    }
+
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const inputs = urls.map((url) => ({
+      url,
+      title: opts.title || undefined,
+    }))
+    const spinner = ora(`Adding ${urls.length} URL(s) to recording...`).start()
+    try {
+      const result = await client.addRecordings(projectId, inputs)
+      spinner.stop()
+      const data = result.data || {}
+      if (opts.json) {
+        console.log(jsonOutput(data))
+      } else {
+        console.log(chalk.green(`Added ${data.affected_count ?? 0} URL(s). Total recorded: ${data.total_recorded ?? '?'}.`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+recordings
+  .command('remove')
+  .description('Remove one or more URLs from recording')
   .option('-p, --project <id>', 'Project ID')
   .option('-y, --yes', 'Skip confirmation')
   .option('--json', 'Output as JSON')
-  .argument('<prompt-id>', 'Prompt ID to delete')
-  .action(async (promptId, opts) => {
+  .argument('<urls...>', 'URLs to remove')
+  .action(async (urls, opts) => {
     const client = getClient()
     const projectId = resolveProject(opts)
 
@@ -656,7 +847,7 @@ prompts
       const readline = require('readline')
       const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
       const answer = await new Promise((resolve) => {
-        rl.question(chalk.yellow(`Delete prompt ${promptId}? [y/N] `), resolve)
+        rl.question(chalk.yellow(`Remove ${urls.length} URL(s) from recording? [y/N] `), resolve)
       })
       rl.close()
       if (answer.toLowerCase() !== 'y') {
@@ -665,15 +856,57 @@ prompts
       }
     }
 
-    const spinner = ora('Deleting prompt...').start()
+    const spinner = ora(`Removing ${urls.length} URL(s) from recording...`).start()
     try {
-      const result = await client.deletePrompt(projectId, promptId)
+      const result = await client.removeRecordings(projectId, urls)
       spinner.stop()
+      const data = result.data || {}
+      if (opts.json) {
+        console.log(jsonOutput(data))
+      } else {
+        console.log(chalk.green(`Removed ${data.affected_count ?? 0} URL(s). Total recorded: ${data.total_recorded ?? '?'}.`))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
 
+recordings
+  .command('generate-prompts')
+  .description('Generate prompt recommendations for recorded target URLs')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--count <n>', 'How many recommendations to return (1-20, default 5)', '5')
+  .option('--json', 'Output as JSON')
+  .argument('<urls...>', 'Recorded or target URLs (1-5)')
+  .addHelpText('after', `
+Examples:
+  $ topify recording generate-prompts https://example.com/blog/post
+  $ topify recording generate-prompts --count 10 https://example.com/a https://example.com/b`)
+  .action(async (urls, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const count = parseInt(opts.count, 10)
+    const spinner = ora('Requesting prompt recommendations...').start()
+    try {
+      const result = await client.createUrlRecommendations(projectId, urls, count)
+      spinner.stop()
       if (opts.json) {
         console.log(jsonOutput(result.data))
       } else {
-        console.log(chalk.green(`Prompt ${promptId} deleted.`))
+        const data = result.data || {}
+        const urlsProvided = data.urls_provided ?? data.urlsProvided ?? urls.length
+        const placeholdersCreated = data.placeholders_created ?? data.placeholdersCreated ?? 0
+        const dbMatches = data.db_matches ?? data.dbMatches
+        const dbMatchesText = /DB-match lookup|background DB-match/i.test(data.message || '')
+          ? 'queued'
+          : (dbMatches ?? 0)
+        console.log(chalk.green(
+          `URLs provided: ${urlsProvided}. ` +
+          `DB matches: ${dbMatchesText}. ` +
+          `Placeholders created: ${placeholdersCreated}.`
+        ))
+        if (data.message) console.log(chalk.dim(`  ${data.message}`))
       }
     } catch (error) {
       spinner.fail(chalk.red(error.message))
@@ -1022,7 +1255,7 @@ actions
         if (workflowId) {
           console.log(`  ${chalk.dim('Workflow ID:')} ${workflowId}`)
         }
-        console.log(chalk.dim('\nCheckpoints will be delivered to your registered webhook.'))
+        console.log(chalk.dim(`\nPoll progress with: topify actions state ${actionId}`))
       }
     } catch (error) {
       spinner.fail(chalk.red(error.message))

@@ -71,9 +71,18 @@ topify competitors delete <id>
 
 ```bash
 topify prompts list                    # list tracked prompts
+topify prompts inspect <prompt-id> --days 30
+topify prompts inspect <prompt-id> --include analytics,chats,domains,urls --providers chatgpt --json
 topify prompts create --topic-id <id> "best CRM for startups"
 topify prompts update <id> --content "new text"
-topify prompts delete <id>
+```
+
+### Recordings - URLs used for prompt discovery
+
+```bash
+topify recording list
+topify recording add https://example.com/blog/post
+topify recording generate-prompts https://example.com/blog/post
 ```
 
 ### Actions — AI-recommended improvements
