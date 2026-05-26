@@ -49,6 +49,119 @@ function parseIncludeList(value, allowed, defaults) {
   return [...new Set(expanded)]
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function normalizePromptType(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/[-\s]+/g, '_')
+}
+
+function promptContent(prompt) {
+  return String(prompt.content || prompt.keyword || '').trim()
+}
+
+function isFailedPrompt(prompt) {
+  const content = promptContent(prompt).toLowerCase()
+  const status = String(prompt.status || prompt.generation_status || prompt.result_status || '').toLowerCase()
+  return status === 'failed' || /^(\[gen_failed\]|\[failed\]|gen_failed\b|failed\b)/i.test(content)
+}
+
+function isGeneratedPrompt(prompt, type) {
+  const promptType = normalizePromptType(prompt.prompt_type || prompt.promptType)
+  if (type === 'all') return ['suggested', 'url_recommended', 'urlrecommended'].includes(promptType)
+  if (type === 'url-recommended') return ['url_recommended', 'urlrecommended'].includes(promptType)
+  return promptType === type
+}
+
+function summarizePromptGeneration(prompts, type) {
+  const items = prompts.filter((p) => isGeneratedPrompt(p, type))
+  const failed = items.filter((p) => isFailedPrompt(p))
+  const pending = items.filter((p) => !promptContent(p) && !isFailedPrompt(p))
+  const ready = items.filter((p) => promptContent(p) && !isFailedPrompt(p))
+  return { items, total: items.length, ready: ready.length, pending: pending.length, failed: failed.length }
+}
+
+function flattenForCsv(value, prefix = '', out = {}) {
+  if (Array.isArray(value)) {
+    out[prefix || 'value'] = value.map((item) => {
+      if (item && typeof item === 'object') return JSON.stringify(item)
+      return item
+    }).join('; ')
+    return out
+  }
+  if (value && typeof value === 'object') {
+    Object.entries(value).forEach(([key, nested]) => {
+      const next = prefix ? `${prefix}.${key}` : key
+      flattenForCsv(nested, next, out)
+    })
+    return out
+  }
+  out[prefix || 'value'] = value
+  return out
+}
+
+function csvEscape(value) {
+  if (value === null || value === undefined) return ''
+  const text = String(value)
+  if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`
+  return text
+}
+
+function toCsv(rows) {
+  const flatRows = rows.map((row) => flattenForCsv(row))
+  const columns = [...new Set(flatRows.flatMap((row) => Object.keys(row)))]
+  return [
+    columns.map(csvEscape).join(','),
+    ...flatRows.map((row) => columns.map((column) => csvEscape(row[column])).join(',')),
+  ].join('\n')
+}
+
+function writeOrPrint(content, outputPath) {
+  if (outputPath) {
+    fs.writeFileSync(path.resolve(outputPath), content)
+    console.log(chalk.green(`Wrote ${path.resolve(outputPath)}`))
+  } else {
+    console.log(content)
+  }
+}
+
+function extractItems(payload, preferredKey) {
+  if (Array.isArray(payload)) return payload
+  if (!payload || typeof payload !== 'object') return []
+  if (preferredKey && Array.isArray(payload[preferredKey])) return payload[preferredKey]
+  if (Array.isArray(payload.items)) return payload.items
+  if (Array.isArray(payload.prompts)) return payload.prompts
+  if (Array.isArray(payload.urls)) return payload.urls
+  if (Array.isArray(payload.active_competitors)) return payload.active_competitors
+  return [payload]
+}
+
+function trendsToRows(payload) {
+  const dates = Array.isArray(payload?.dates) ? payload.dates : []
+  const series = Array.isArray(payload?.series) ? payload.series : []
+  return series.flatMap((entry) => dates.map((date, index) => ({
+    date,
+    period: payload.period || '',
+    competitor_id: entry.competitor_id,
+    name: entry.name,
+    website: entry.website,
+    is_own_brand: entry.is_own_brand,
+    visibility: Array.isArray(entry.visibility) ? entry.visibility[index] : undefined,
+    sentiment: Array.isArray(entry.sentiment) ? entry.sentiment[index] : undefined,
+    position: Array.isArray(entry.position) ? entry.position[index] : undefined,
+  })))
+}
+
+function exportRows(resource, payload, preferredKey) {
+  if (resource === 'trends') return trendsToRows(payload)
+  return extractItems(payload, preferredKey)
+}
+
 // ============ config ============
 program
   .command('config')
@@ -752,6 +865,106 @@ background. Poll with: topify prompts list`)
     }
   })
 
+prompts
+  .command('generation-status')
+  .description('Show pending/ready counts for generated prompt placeholders')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--type <type>', 'suggested, url-recommended, or all', 'all')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    const type = String(opts.type || 'all').toLowerCase()
+    if (!['all', 'suggested', 'url-recommended'].includes(type)) {
+      console.error(chalk.red('--type must be one of: all, suggested, url-recommended'))
+      process.exit(1)
+    }
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Checking generated prompts...').start()
+    try {
+      const result = await client.listPrompts(projectId)
+      spinner.stop()
+      const promptsList = result.data?.prompts || (Array.isArray(result.data) ? result.data : result.data?.items || [])
+      const summary = summarizePromptGeneration(promptsList, type)
+      if (opts.json) {
+        console.log(jsonOutput({ project_id: projectId, type, ...summary }))
+      } else {
+        console.log(chalk.bold(`\nGenerated prompt status (${type})\n`))
+        console.log(`  ${chalk.dim('Total:')}   ${summary.total}`)
+        console.log(`  ${chalk.dim('Ready:')}   ${summary.ready}`)
+        console.log(`  ${chalk.dim('Pending:')} ${summary.pending}`)
+        console.log(`  ${chalk.dim('Failed:')}  ${summary.failed}`)
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+prompts
+  .command('watch')
+  .description('Poll generated prompts until placeholders are filled')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--type <type>', 'suggested, url-recommended, or all', 'all')
+  .option('--interval <seconds>', 'Polling interval', '5')
+  .option('--timeout <seconds>', 'Maximum wait time', '300')
+  .option('--json', 'Output final status as JSON')
+  .action(async (opts) => {
+    const type = String(opts.type || 'all').toLowerCase()
+    if (!['all', 'suggested', 'url-recommended'].includes(type)) {
+      console.error(chalk.red('--type must be one of: all, suggested, url-recommended'))
+      process.exit(1)
+    }
+    const intervalMs = Math.max(1, parseInt(opts.interval, 10) || 5) * 1000
+    const timeoutMs = Math.max(1, parseInt(opts.timeout, 10) || 300) * 1000
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const started = Date.now()
+    let finalSummary = null
+
+    try {
+      while (Date.now() - started <= timeoutMs) {
+        const result = await client.listPrompts(projectId)
+        const promptsList = result.data?.prompts || (Array.isArray(result.data) ? result.data : result.data?.items || [])
+        finalSummary = summarizePromptGeneration(promptsList, type)
+        const elapsed = Math.round((Date.now() - started) / 1000)
+        if (!opts.json) {
+          console.error(chalk.dim(
+            `ready=${finalSummary.ready} pending=${finalSummary.pending} failed=${finalSummary.failed} elapsed=${elapsed}s`
+          ))
+        }
+        if (finalSummary.total > 0 && finalSummary.pending === 0) break
+        await sleep(intervalMs)
+      }
+
+      const noItems = !finalSummary || finalSummary.total === 0
+      const timedOut = noItems || finalSummary.pending > 0
+      const hasFailed = Boolean(finalSummary && finalSummary.failed > 0)
+      const payload = {
+        project_id: projectId,
+        type,
+        timed_out: timedOut,
+        has_failed: hasFailed,
+        ...(finalSummary || { items: [], total: 0, ready: 0, pending: 0, failed: 0 }),
+      }
+      if (opts.json) {
+        console.log(jsonOutput(payload))
+      } else if (noItems) {
+        console.log(chalk.yellow(`Timed out with no generated prompt placeholders for type "${type}".`))
+      } else if (timedOut) {
+        console.log(chalk.yellow(`Timed out with ${finalSummary.pending} pending generated prompt(s).`))
+      } else if (hasFailed) {
+        console.log(chalk.red(`Generated prompts completed with ${finalSummary.failed} failed item(s).`))
+      } else {
+        console.log(chalk.green('Generated prompts are ready.'))
+      }
+      if (timedOut) process.exit(2)
+      if (hasFailed) process.exit(3)
+    } catch (error) {
+      console.error(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
 // ============ recordings ============
 const recordings = program
   .command('recording')
@@ -914,9 +1127,59 @@ Examples:
     }
   })
 
+// ============ reports ============
+const reports = program
+  .command('reports')
+  .alias('report')
+  .description('Generate project reports')
+
+reports
+  .command('generate')
+  .alias('download')
+  .description('Generate a self-contained HTML project report')
+  .option('-p, --project <id>', 'Project ID')
+  .option('-d, --days <n>', 'Lookback days', '30')
+  .option('--from <date>', 'Start date (YYYY-MM-DD)')
+  .option('--to <date>', 'End date (YYYY-MM-DD)')
+  .option('-o, --output <file>', 'Output HTML file')
+  .option('--stdout', 'Print HTML to stdout instead of writing a file')
+  .addHelpText('after', `
+Examples:
+  $ topify reports generate --days 30
+  $ topify reports generate --from 2026-05-01 --to 2026-05-22 -o report.html`)
+  .action(async (opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Generating report...').start()
+    try {
+      const result = await client.generateReport(projectId, {
+        days: opts.days,
+        from: opts.from,
+        to: opts.to,
+        format: opts.stdout ? 'inline' : 'download',
+      })
+      spinner.stop()
+      if (opts.stdout) {
+        process.stdout.write(result.body)
+        return
+      }
+      const dateLabel = opts.from && opts.to ? `${opts.from}_${opts.to}` : `${opts.days || 30}d`
+      const output = opts.output || `topify-report-${projectId}-${dateLabel}.html`
+      fs.writeFileSync(path.resolve(output), result.body)
+      console.log(chalk.green(`Report written to ${path.resolve(output)}`))
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
 // ============ sources ============
-program
+const sources = program
   .command('sources')
+  .description('Source domains cited in AI responses')
+
+sources
+  .command('list', { isDefault: true })
   .description('List source domains cited in AI responses')
   .option('-p, --project <id>', 'Project ID')
   .option('-d, --days <n>', 'Lookback days', '7')
@@ -943,6 +1206,108 @@ program
         const sources = result.data?.items || result.data || []
         console.log(chalk.bold(`\nSources (last ${opts.days} days)\n`))
         console.log(sourcesTable(sources))
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+sources
+  .command('detail')
+  .description('Show citation drilldown for one source domain')
+  .argument('<domain>', 'Source domain, for example example.com')
+  .option('-p, --project <id>', 'Project ID')
+  .option('-d, --days <n>', 'Lookback days', '30')
+  .option('--from <date>', 'Start date')
+  .option('--to <date>', 'End date')
+  .option('--providers <list>', 'Filter providers')
+  .option('--page <n>', 'Page number', '1')
+  .option('--page-size <n>', 'Page size', '20')
+  .option('--json', 'Output as JSON')
+  .action(async (domain, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Fetching source detail...').start()
+    try {
+      const result = await client.getSourceDetail(projectId, domain, {
+        days: opts.days,
+        from: opts.from,
+        to: opts.to,
+        providers: opts.providers,
+        page: opts.page,
+        pageSize: opts.pageSize,
+      })
+      spinner.stop()
+      const data = result.data || {}
+      if (opts.json) {
+        console.log(jsonOutput(data))
+      } else {
+        const stats = data.stats || {}
+        console.log(chalk.bold(`\n${data.domain || domain}\n`))
+        console.log(`  ${chalk.dim('Citations:')} ${stats.total_citations ?? 0}`)
+        console.log(`  ${chalk.dim('URLs:')}      ${stats.total_urls ?? 0}`)
+        console.log(`  ${chalk.dim('Chats:')}     ${stats.total_chats ?? 0}`)
+        const urls = data.urls?.items || []
+        if (urls.length) {
+          console.log(chalk.bold('\nTop URLs\n'))
+          urls.slice(0, 10).forEach((u, i) => {
+            console.log(`  ${chalk.dim(`${i + 1}.`)} ${u.url} ${chalk.dim(`(${u.citation_count} citations)`)}`)
+          })
+        }
+        const promptsList = data.prompts?.items || []
+        if (promptsList.length) {
+          console.log(chalk.bold('\nTop Prompts\n'))
+          promptsList.slice(0, 10).forEach((p, i) => {
+            console.log(`  ${chalk.dim(`${i + 1}.`)} ${p.content} ${chalk.dim(`(${p.citation_count} citations)`)}`)
+          })
+        }
+      }
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+sources
+  .command('chats')
+  .description('Show LLM chats that cited one source domain')
+  .argument('<domain>', 'Source domain, for example example.com')
+  .option('-p, --project <id>', 'Project ID')
+  .option('-d, --days <n>', 'Lookback days', '30')
+  .option('--from <date>', 'Start date')
+  .option('--to <date>', 'End date')
+  .option('--providers <list>', 'Filter providers')
+  .option('--page <n>', 'Page number', '1')
+  .option('--page-size <n>', 'Page size', '10')
+  .option('--json', 'Output as JSON')
+  .action(async (domain, opts) => {
+    const client = getClient()
+    const projectId = resolveProject(opts)
+    const spinner = ora('Fetching source chats...').start()
+    try {
+      const result = await client.getSourceChats(projectId, domain, {
+        days: opts.days,
+        from: opts.from,
+        to: opts.to,
+        providers: opts.providers,
+        page: opts.page,
+        pageSize: opts.pageSize,
+      })
+      spinner.stop()
+      const data = result.data || {}
+      if (opts.json) {
+        console.log(jsonOutput(data))
+      } else {
+        const chats = data.chats?.items || []
+        console.log(chalk.bold(`\nChats citing ${data.domain || domain} (${data.chats?.total ?? chats.length})\n`))
+        chats.forEach((chat, i) => {
+          const refs = chat.references || []
+          console.log(`${chalk.dim(`${i + 1}.`)} ${chalk.cyan(chat.platform || '')} ${chalk.dim(chat.date || '')}`)
+          console.log(`   ${chat.prompt_content || ''}`)
+          console.log(`   ${chalk.dim(`${refs.length} cited URL(s): ${refs.map((r) => r.link).slice(0, 3).join(', ')}`)}`)
+          if (chat.chat_preview) console.log(`   ${chat.chat_preview.replace(/\s+/g, ' ').slice(0, 220)}`)
+        })
       }
     } catch (error) {
       spinner.fail(chalk.red(error.message))
@@ -1002,6 +1367,115 @@ program
       })
       spinner.stop()
       console.log(jsonOutput(result.data))
+    } catch (error) {
+      spinner.fail(chalk.red(error.message))
+      process.exit(1)
+    }
+  })
+
+// ============ exports ============
+program
+  .command('export')
+  .description('Export project data as JSON or CSV')
+  .argument('<resource>', 'projects|prompts|sources|competitors|recordings|topics|overview|trends|actions')
+  .option('-p, --project <id>', 'Project ID')
+  .option('--format <format>', 'json or csv', 'json')
+  .option('-o, --output <file>', 'Output file')
+  .option('-d, --days <n>', 'Lookback days', '30')
+  .option('--from <date>', 'Start date')
+  .option('--to <date>', 'End date')
+  .option('--providers <list>', 'Filter providers')
+  .option('--status <status>', 'Filter actions by status')
+  .option('--page <n>', 'Page number', '1')
+  .option('--page-size <n>', 'Page size', '100')
+  .addHelpText('after', `
+Examples:
+  $ topify export prompts --format csv -o prompts.csv
+  $ topify export sources --days 30 --format json
+  $ topify export recordings --format csv`)
+  .action(async (resource, opts) => {
+    const normalizedResource = String(resource || '').toLowerCase()
+    const format = String(opts.format || 'json').toLowerCase()
+    const allowedResources = new Set([
+      'projects',
+      'prompts',
+      'sources',
+      'competitors',
+      'recordings',
+      'recording',
+      'topics',
+      'overview',
+      'trends',
+      'actions',
+    ])
+    if (!['json', 'csv'].includes(format)) {
+      console.error(chalk.red('--format must be json or csv'))
+      process.exit(1)
+    }
+    if (!allowedResources.has(normalizedResource)) {
+      console.error(chalk.red(`Unknown export resource: ${resource}`))
+      process.exit(1)
+    }
+
+    const client = getClient()
+    const spinner = ora(`Exporting ${normalizedResource}...`).start()
+    try {
+      const needsProject = normalizedResource !== 'projects'
+      const projectId = needsProject ? resolveProject(opts) : null
+      const window = {
+        days: opts.days,
+        from: opts.from,
+        to: opts.to,
+        providers: opts.providers,
+        page: opts.page,
+        pageSize: opts.pageSize,
+      }
+      let payload
+      let preferredKey
+
+      switch (normalizedResource) {
+        case 'projects':
+          payload = (await client.listProjects()).data
+          break
+        case 'prompts':
+          payload = (await client.listPrompts(projectId)).data
+          preferredKey = 'prompts'
+          break
+        case 'sources':
+          payload = (await client.getSources(projectId, window)).data
+          break
+        case 'competitors':
+          payload = (await client.getCompetitors(projectId, window)).data
+          preferredKey = 'active_competitors'
+          break
+        case 'recordings':
+        case 'recording':
+          payload = (await client.listRecordings(projectId)).data
+          preferredKey = 'urls'
+          break
+        case 'topics':
+          payload = (await client.getTopics(projectId)).data
+          break
+        case 'overview':
+          payload = (await client.getOverview(projectId, window)).data
+          preferredKey = 'items'
+          break
+        case 'trends':
+          payload = (await client.getVisibilityTrends(projectId, window)).data
+          break
+        case 'actions':
+          payload = (await client.listActions(projectId, { status: opts.status })).data
+          preferredKey = 'items'
+          break
+        default:
+          throw new Error(`Unknown export resource: ${resource}`)
+      }
+
+      spinner.stop()
+      const content = format === 'json'
+        ? jsonOutput(payload)
+        : toCsv(exportRows(normalizedResource, payload, preferredKey))
+      writeOrPrint(content, opts.output)
     } catch (error) {
       spinner.fail(chalk.red(error.message))
       process.exit(1)

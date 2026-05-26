@@ -90,6 +90,10 @@ function overviewTable(items) {
 }
 
 function sourcesTable(sources) {
+  const normalizedSources = sources.map((s) => ({
+    ...s,
+    citation_count: s.citation_count ?? s.reference_count ?? s.referenceCount ?? s.citations,
+  }))
   const table = new Table({
     head: [
       chalk.bold('#'),
@@ -99,7 +103,7 @@ function sourcesTable(sources) {
     ],
   })
 
-  sources.slice(0, 20).forEach((s, i) => {
+  normalizedSources.slice(0, 20).forEach((s, i) => {
     table.push([
       i + 1,
       s.domain || '—',

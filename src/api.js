@@ -31,6 +31,38 @@ class TopifyAPI {
     return response.json()
   }
 
+  async requestRaw(path, params = {}, extraHeaders = {}) {
+    const url = new URL(`${BASE_URL}${path}`)
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        url.searchParams.append(key, value)
+      }
+    })
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        'X-API-Key': this.apiKey,
+        ...extraHeaders,
+      },
+    })
+
+    const body = await response.text()
+    if (!response.ok) {
+      let message = body || `API error: ${response.status}`
+      try {
+        const error = JSON.parse(body)
+        message = error.detail || error.message || message
+      } catch (_) {}
+      throw new Error(message)
+    }
+
+    const headers = {}
+    response.headers.forEach((value, key) => {
+      headers[key] = value
+    })
+    return { body, headers, status: response.status }
+  }
+
   async mutate(method, path, body = null) {
     const url = `${BASE_URL}${path}`
     const options = {
@@ -253,9 +285,41 @@ class TopifyAPI {
     return this.mutate('DELETE', `/projects/${projectId}/recording`, { urls })
   }
 
+  // Reports
+  async generateReport(projectId, opts = {}) {
+    return this.requestRaw(`/projects/${projectId}/report`, {
+      duration_days: opts.days,
+      date_from: opts.from,
+      date_to: opts.to,
+      format: opts.format || 'inline',
+    }, { Accept: 'text/html' })
+  }
+
   // Sources
   async getSources(projectId, opts = {}) {
     return this.request(`/projects/${projectId}/sources`, {
+      duration_days: opts.days,
+      date_from: opts.from,
+      date_to: opts.to,
+      providers: opts.providers,
+      page: opts.page,
+      page_size: opts.pageSize,
+    })
+  }
+
+  async getSourceDetail(projectId, domain, opts = {}) {
+    return this.request(`/projects/${projectId}/sources/${encodeURIComponent(domain)}/detail`, {
+      duration_days: opts.days,
+      date_from: opts.from,
+      date_to: opts.to,
+      providers: opts.providers,
+      page: opts.page,
+      page_size: opts.pageSize,
+    })
+  }
+
+  async getSourceChats(projectId, domain, opts = {}) {
+    return this.request(`/projects/${projectId}/sources/${encodeURIComponent(domain)}/chats`, {
       duration_days: opts.days,
       date_from: opts.from,
       date_to: opts.to,
