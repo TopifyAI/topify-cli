@@ -121,6 +121,24 @@ function toCsv(rows) {
   ].join('\n')
 }
 
+function isIdKey(key) {
+  return key === 'id' ||
+    key === 'ids' ||
+    /_ids?$/.test(key) ||
+    /Ids?$/.test(key)
+}
+
+function stripExportIds(value) {
+  if (Array.isArray(value)) return value.map(stripExportIds)
+  if (!value || typeof value !== 'object') return value
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !isIdKey(key))
+      .map(([key, nested]) => [key, stripExportIds(nested)])
+  )
+}
+
 function writeOrPrint(content, outputPath) {
   if (outputPath) {
     fs.writeFileSync(path.resolve(outputPath), content)
@@ -1473,8 +1491,8 @@ Examples:
 
       spinner.stop()
       const content = format === 'json'
-        ? jsonOutput(payload)
-        : toCsv(exportRows(normalizedResource, payload, preferredKey))
+        ? jsonOutput(stripExportIds(payload))
+        : toCsv(stripExportIds(exportRows(normalizedResource, payload, preferredKey)))
       writeOrPrint(content, opts.output)
     } catch (error) {
       spinner.fail(chalk.red(error.message))

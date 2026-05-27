@@ -12,7 +12,7 @@ npm install -g topify-cli
 
 ```bash
 # 1. Set your API key (get it at https://app.topify.ai → Settings → API Keys)
-topify config --api-key tk_live_xxxxxxxxxxxxx
+topify config --api-key <api-key>
 
 # 2. List your projects
 topify projects
@@ -192,7 +192,7 @@ All data commands support:
 You can also set your API key via environment variable:
 
 ```bash
-export TOPIFY_API_KEY=tk_live_xxxxxxxxxxxxx
+export TOPIFY_API_KEY=<api-key>
 ```
 
 ## Use with Claude Code
