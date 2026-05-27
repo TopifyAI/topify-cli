@@ -12,7 +12,7 @@ npm install -g topify-cli
 
 ```bash
 # 1. Set your API key (get it at https://app.topify.ai → Settings → API Keys)
-topify config --api-key tk_live_xxxxxxxxxxxxx
+topify config --api-key <api-key>
 
 # 2. List your projects
 topify projects
@@ -71,12 +71,30 @@ topify competitors delete <id>
 
 ```bash
 topify prompts list                    # list tracked prompts
+topify prompts inspect <prompt-id> --days 30
+topify prompts inspect <prompt-id> --include analytics,chats,domains,urls --providers chatgpt --json
+topify prompts generation-status --type url-recommended
+topify prompts watch --type all --timeout 300
 topify prompts create --topic-id <id> "best CRM for startups"
 topify prompts update <id> --content "new text"
-topify prompts delete <id>
 ```
 
-### Actions — AI-recommended improvements
+### Recordings - URLs used for prompt discovery
+
+```bash
+topify recording list
+topify recording add https://example.com/blog/post
+topify recording generate-prompts https://example.com/blog/post
+```
+
+### Reports
+
+```bash
+topify reports generate --days 30
+topify reports generate --from 2026-05-01 --to 2026-05-22 -o report.html
+```
+
+### Actions
 
 ```bash
 topify actions list                    # list action items
@@ -109,8 +127,12 @@ topify webhooks delete <id>
 
 ```bash
 topify sources                         # domains cited in AI responses
+topify sources detail example.com      # source stats, URLs, prompts
+topify sources chats example.com       # chats that cited a source
 topify topics                          # prompt topic groups
 topify trends --days 30                # visibility over time
+topify export prompts --format csv -o prompts.csv
+topify export sources --days 30 --format json
 ```
 
 ## Actions (agent-friendly)
@@ -170,7 +192,7 @@ All data commands support:
 You can also set your API key via environment variable:
 
 ```bash
-export TOPIFY_API_KEY=tk_live_xxxxxxxxxxxxx
+export TOPIFY_API_KEY=<api-key>
 ```
 
 ## Use with Claude Code

@@ -90,6 +90,10 @@ function overviewTable(items) {
 }
 
 function sourcesTable(sources) {
+  const normalizedSources = sources.map((s) => ({
+    ...s,
+    citation_count: s.citation_count ?? s.reference_count ?? s.referenceCount ?? s.citations,
+  }))
   const table = new Table({
     head: [
       chalk.bold('#'),
@@ -99,12 +103,37 @@ function sourcesTable(sources) {
     ],
   })
 
-  sources.slice(0, 20).forEach((s, i) => {
+  normalizedSources.slice(0, 20).forEach((s, i) => {
     table.push([
       i + 1,
       s.domain || '—',
       s.citation_count ?? s.citations ?? '—',
       s.category || '—',
+    ])
+  })
+
+  return table.toString()
+}
+
+function recordingsTable(recordings) {
+  const items = recordings?.urls || recordings?.items || recordings || []
+  const table = new Table({
+    head: [
+      chalk.bold('ID'),
+      chalk.bold('URL'),
+      chalk.bold('Title'),
+      chalk.bold('Added'),
+    ],
+    colWidths: [38, 48, 30, 15],
+    wordWrap: true,
+  })
+
+  items.slice(0, 20).forEach((item) => {
+    table.push([
+      item.id || '',
+      item.url || '',
+      item.title || chalk.dim('-'),
+      formatDate(item.created_at),
     ])
   })
 
@@ -240,4 +269,150 @@ function webhooksTable(webhooks) {
   return table.toString()
 }
 
-module.exports = { projectsTable, competitorsTable, overviewTable, sourcesTable, jsonOutput, slimOverview, slimCompetitors, formatPercent, formatDate, actionsTable, actionDetail, webhooksTable }
+function dash(value) {
+  return value === null || value === undefined || value === '' ? chalk.dim('-') : value
+}
+
+function truncate(value, maxLength) {
+  const text = String(value || '')
+  if (text.length <= maxLength) return text
+  return text.slice(0, Math.max(0, maxLength - 3)) + '...'
+}
+
+function asItems(data) {
+  if (!data) return []
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data.items)) return data.items
+  return []
+}
+
+function chartProviders(chart) {
+  const providers = new Set()
+  Object.values(chart || {}).forEach((items) => {
+    ;(items || []).forEach((item) => {
+      if (item.provider) providers.add(item.provider)
+    })
+  })
+  return [...providers].sort()
+}
+
+function promptInspectSummary(data) {
+  const prompt = data.prompt || {}
+  const analytics = data.analytics || null
+  const domains = asItems(data.domains)
+  const urls = asItems(data.urls)
+  const chats = asItems(data.chats)
+
+  const lines = []
+  lines.push('')
+  lines.push(chalk.bold('Prompt'))
+  lines.push(`${chalk.bold('ID:')}       ${prompt.id || data.prompt_id || ''}`)
+  lines.push(`${chalk.bold('Type:')}     ${dash(prompt.prompt_type)}`)
+  lines.push(`${chalk.bold('Topic:')}    ${dash(prompt.topic_id)}`)
+  lines.push(`${chalk.bold('Country:')}  ${dash(prompt.country)}`)
+  lines.push(`${chalk.bold('Content:')}  ${dash(prompt.content)}`)
+  lines.push('')
+  lines.push(chalk.bold('Window'))
+  lines.push(`${chalk.bold('Days:')}     ${dash(data.window?.duration_days)}`)
+  lines.push(`${chalk.bold('From:')}     ${dash(data.window?.date_from)}`)
+  lines.push(`${chalk.bold('To:')}       ${dash(data.window?.date_to)}`)
+  lines.push(`${chalk.bold('Providers:')} ${dash(data.window?.providers)}`)
+
+  lines.push('')
+  lines.push(chalk.bold('Metrics'))
+  lines.push(`${chalk.bold('Visibility:')} ${formatPercent(prompt.visibility)}`)
+  lines.push(`${chalk.bold('Sentiment:')}  ${formatFloat(prompt.sentiment)}`)
+  lines.push(`${chalk.bold('Position:')}   ${formatFloat(prompt.position)}`)
+  lines.push(`${chalk.bold('Volume:')}     ${dash(prompt.volume)}`)
+  lines.push(`${chalk.bold('Intent:')}     ${dash(prompt.intent)}`)
+  lines.push(`${chalk.bold('CVR:')}        ${prompt.cvr === null || prompt.cvr === undefined ? chalk.dim('-') : prompt.cvr}`)
+
+  if (analytics) {
+    const visibilityDates = Object.keys(analytics.visibility_chart || {})
+    const providers = chartProviders(analytics.visibility_chart)
+    lines.push('')
+    lines.push(chalk.bold('Analytics'))
+    lines.push(`${chalk.bold('Date buckets:')} ${visibilityDates.length}`)
+    lines.push(`${chalk.bold('Providers:')}    ${providers.length ? providers.join(', ') : chalk.dim('-')}`)
+    lines.push(`${chalk.bold('Volume:')}       ${dash(analytics.volume)}`)
+    lines.push(`${chalk.bold('Sentiment:')}    ${formatFloat(analytics.sentiment)}`)
+  }
+
+  if (domains.length > 0) {
+    const table = new Table({
+      head: [chalk.bold('Domain'), chalk.bold('Citations'), chalk.bold('Used %'), chalk.bold('Mentioned')],
+      colWidths: [38, 12, 10, 10],
+      wordWrap: true,
+    })
+    domains.slice(0, 10).forEach((d) => {
+      table.push([
+        d.domain || '-',
+        d.citation_count ?? '-',
+        d.used_percentage === null || d.used_percentage === undefined ? '-' : d.used_percentage.toFixed(1),
+        d.mentioned ? 'yes' : 'no',
+      ])
+    })
+    lines.push('')
+    lines.push(chalk.bold(`Top Domains (${domains.length})`))
+    lines.push(table.toString())
+  } else if (Object.prototype.hasOwnProperty.call(data, 'domains')) {
+    lines.push('')
+    lines.push(chalk.bold('Top Domains (0)'))
+    lines.push(chalk.dim('No cited domains in this window.'))
+  }
+
+  if (urls.length > 0) {
+    const table = new Table({
+      head: [chalk.bold('URL'), chalk.bold('Domain'), chalk.bold('Mentions')],
+      colWidths: [62, 26, 10],
+      wordWrap: true,
+    })
+    urls.slice(0, 10).forEach((u) => {
+      table.push([
+        truncate(u.url, 58),
+        u.domain || '-',
+        u.mentioned_count ?? '-',
+      ])
+    })
+    lines.push('')
+    lines.push(chalk.bold(`Top URLs (${urls.length})`))
+    lines.push(table.toString())
+  } else if (Object.prototype.hasOwnProperty.call(data, 'urls')) {
+    lines.push('')
+    lines.push(chalk.bold('Top URLs (0)'))
+    lines.push(chalk.dim('No cited URLs in this window.'))
+  }
+
+  if (chats.length > 0) {
+    const table = new Table({
+      head: [chalk.bold('Date'), chalk.bold('Provider'), chalk.bold('Mentioned'), chalk.bold('Refs'), chalk.bold('Preview')],
+      colWidths: [14, 16, 11, 7, 58],
+      wordWrap: true,
+    })
+    chats.slice(0, 5).forEach((c) => {
+      table.push([
+        c.date ? c.date.slice(0, 10) : '-',
+        c.platform || '-',
+        c.mentioned ? 'yes' : 'no',
+        Array.isArray(c.references) ? c.references.length : 0,
+        truncate(c.chat_preview || c.full_content || '', 54),
+      ])
+    })
+    lines.push('')
+    lines.push(chalk.bold(`Chats (${chats.length})`))
+    lines.push(table.toString())
+    if (chats.length > 5) {
+      lines.push(chalk.dim(`Showing first 5 chats. Use --json for full evidence.`))
+    }
+  } else if (Object.prototype.hasOwnProperty.call(data, 'chats')) {
+    lines.push('')
+    lines.push(chalk.bold('Chats (0)'))
+    lines.push(chalk.dim('No chats in this scoped window.'))
+  }
+
+  lines.push('')
+  lines.push(chalk.dim('Use --json for raw joinable evidence.'))
+  return lines.join('\n')
+}
+
+module.exports = { projectsTable, competitorsTable, overviewTable, sourcesTable, recordingsTable, jsonOutput, slimOverview, slimCompetitors, formatPercent, formatDate, actionsTable, actionDetail, webhooksTable, promptInspectSummary }

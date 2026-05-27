@@ -31,6 +31,38 @@ class TopifyAPI {
     return response.json()
   }
 
+  async requestRaw(path, params = {}, extraHeaders = {}) {
+    const url = new URL(`${BASE_URL}${path}`)
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        url.searchParams.append(key, value)
+      }
+    })
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        'X-API-Key': this.apiKey,
+        ...extraHeaders,
+      },
+    })
+
+    const body = await response.text()
+    if (!response.ok) {
+      let message = body || `API error: ${response.status}`
+      try {
+        const error = JSON.parse(body)
+        message = error.detail || error.message || message
+      } catch (_) {}
+      throw new Error(message)
+    }
+
+    const headers = {}
+    response.headers.forEach((value, key) => {
+      headers[key] = value
+    })
+    return { body, headers, status: response.status }
+  }
+
   async mutate(method, path, body = null) {
     const url = `${BASE_URL}${path}`
     const options = {
@@ -152,10 +184,16 @@ class TopifyAPI {
   }
 
   // Prompts
-  async listPrompts(projectId, opts = {}) {
-    return this.request(`/projects/${projectId}/prompts`, {
-      page: opts.page,
-      page_size: opts.pageSize,
+  async listPrompts(projectId) {
+    return this.request(`/projects/${projectId}/prompts`)
+  }
+
+  async getPrompt(projectId, promptId, opts = {}) {
+    return this.request(`/projects/${projectId}/prompts/${promptId}`, {
+      duration_days: opts.days,
+      date_from: opts.from,
+      date_to: opts.to,
+      providers: opts.providers,
     })
   }
 
@@ -174,10 +212,6 @@ class TopifyAPI {
     if (fields.topicId !== undefined) body.topicId = fields.topicId
     if (fields.promptType !== undefined) body.promptType = fields.promptType
     return this.mutate('PATCH', `/projects/${projectId}/prompts/${promptId}`, body)
-  }
-
-  async deletePrompt(projectId, promptId) {
-    return this.mutate('DELETE', `/projects/${projectId}/prompts/${promptId}`)
   }
 
   // Suggested-prompt generation (background pipeline)
@@ -211,9 +245,81 @@ class TopifyAPI {
     })
   }
 
+  async getPromptChats(projectId, promptId, opts = {}) {
+    return this.request(`/projects/${projectId}/prompts/${promptId}/chats`, {
+      duration_days: opts.days,
+      date_from: opts.from,
+      date_to: opts.to,
+      providers: opts.providers,
+    })
+  }
+
+  async getPromptDomains(projectId, promptId, opts = {}) {
+    return this.request(`/projects/${projectId}/prompts/${promptId}/domains`, {
+      duration_days: opts.days,
+      date_from: opts.from,
+      date_to: opts.to,
+      providers: opts.providers,
+    })
+  }
+
+  async getPromptUrls(projectId, promptId, opts = {}) {
+    return this.request(`/projects/${projectId}/prompts/${promptId}/urls`, {
+      duration_days: opts.days,
+      date_from: opts.from,
+      date_to: opts.to,
+      providers: opts.providers,
+    })
+  }
+
+  // Recordings
+  async listRecordings(projectId) {
+    return this.request(`/projects/${projectId}/recording`)
+  }
+
+  async addRecordings(projectId, urls) {
+    return this.mutate('POST', `/projects/${projectId}/recording`, { urls })
+  }
+
+  async removeRecordings(projectId, urls) {
+    return this.mutate('DELETE', `/projects/${projectId}/recording`, { urls })
+  }
+
+  // Reports
+  async generateReport(projectId, opts = {}) {
+    return this.requestRaw(`/projects/${projectId}/report`, {
+      duration_days: opts.days,
+      date_from: opts.from,
+      date_to: opts.to,
+      format: opts.format || 'inline',
+    }, { Accept: 'text/html' })
+  }
+
   // Sources
   async getSources(projectId, opts = {}) {
     return this.request(`/projects/${projectId}/sources`, {
+      duration_days: opts.days,
+      date_from: opts.from,
+      date_to: opts.to,
+      providers: opts.providers,
+      page: opts.page,
+      page_size: opts.pageSize,
+    })
+  }
+
+  async getSourceDetail(projectId, domain, opts = {}) {
+    return this.request(`/projects/${projectId}/sources/${encodeURIComponent(domain)}/detail`, {
+      duration_days: opts.days,
+      date_from: opts.from,
+      date_to: opts.to,
+      providers: opts.providers,
+      page: opts.page,
+      page_size: opts.pageSize,
+    })
+  }
+
+  async getSourceChats(projectId, domain, opts = {}) {
+    return this.request(`/projects/${projectId}/sources/${encodeURIComponent(domain)}/chats`, {
       duration_days: opts.days,
       date_from: opts.from,
       date_to: opts.to,
@@ -230,7 +336,7 @@ class TopifyAPI {
 
   // Visibility trends
   async getVisibilityTrends(projectId, opts = {}) {
-    return this.request(`/projects/${projectId}/visibility-trends`, {
+    return this.request(`/projects/${projectId}/visibility`, {
       duration_days: opts.days,
       date_from: opts.from,
       date_to: opts.to,
@@ -240,7 +346,7 @@ class TopifyAPI {
 
   // Sources analytics
   async getSourcesAnalytics(projectId, opts = {}) {
-    return this.request(`/projects/${projectId}/sources-analytics`, {
+    return this.request(`/projects/${projectId}/sources/analytics`, {
       duration_days: opts.days,
       date_from: opts.from,
       date_to: opts.to,
