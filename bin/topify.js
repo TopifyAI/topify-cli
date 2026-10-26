@@ -14,14 +14,14 @@ const program = new Command()
 program
   .name('topify')
   .description('Topify AI Visibility CLI - Monitor your brand in AI search results')
-  .version('0.4.0')
+  .version(require('../package.json').version)
 
 // Helper to get authenticated API client
 function getClient() {
   const key = getApiKey()
   if (!key) {
     console.error(chalk.red('No API key configured. Run: topify config --api-key <key>'))
-    console.error(chalk.dim('Get your key at: https://app.topify.ai → Settings → API Keys'))
+    console.error(chalk.dim('Get your key at: https://app.topify.ai → Management → Members → API Keys'))
     process.exit(1)
   }
   return new TopifyAPI(key)
@@ -420,8 +420,13 @@ prompts
   .command('list')
   .description('List tracked prompts')
   .option('-p, --project <id>', 'Project ID')
-  .option('--page <n>', 'Page number', '1')
-  .option('--page-size <n>', 'Items per page', '50')
+  .option('-d, --days <n>', 'Lookback days')
+  .option('--from <date>', 'Start date (YYYY-MM-DD)')
+  .option('--to <date>', 'End date (YYYY-MM-DD)')
+  .option('--providers <list>', 'Filter providers (comma-separated)')
+  .option('--topic-id <id>', 'Filter prompts by topic ID')
+  .option('--page <n>', 'Client-side page (legacy compatibility)')
+  .option('--page-size <n>', 'Client-side page size', '20')
   .option('--json', 'Output as JSON')
   .action(async (opts) => {
     const client = getClient()
@@ -429,15 +434,31 @@ prompts
     const spinner = ora('Fetching prompts...').start()
     try {
       const result = await client.listPrompts(projectId, {
-        page: opts.page,
-        pageSize: opts.pageSize,
+        days: opts.days,
+        from: opts.from,
+        to: opts.to,
+        providers: opts.providers,
       })
       spinner.stop()
+      if (opts.topicId) {
+        const data = result.data
+        const items = Array.isArray(data) ? data : (data?.prompts || data?.items || [])
+        const filtered = items.filter(p => (p.topic_id || p.topicId) === opts.topicId)
+        result.data = Array.isArray(data) ? filtered : { ...data, prompts: filtered, total: filtered.length }
+      }
 
+      if (opts.page !== undefined || process.argv.includes('--page-size')) {
+        const page = Number(opts.page || 1), size = Number(opts.pageSize)
+        if (!Number.isInteger(page) || page < 1 || !Number.isInteger(size) || size < 1) throw new Error('Page and page size must be positive integers')
+        const data = result.data
+        const items = Array.isArray(data) ? data : (data?.prompts || data?.items || [])
+        const selected = items.slice((page - 1) * size, page * size)
+        result.data = Array.isArray(data) ? selected : { ...data, prompts: selected, total: items.length, page, page_size: size }
+      }
       if (opts.json) {
         console.log(jsonOutput(result.data))
       } else {
-        const items = result.data?.items || result.data || []
+        const items = Array.isArray(result.data) ? result.data : (result.data?.prompts || result.data?.items || [])
         console.log(chalk.bold(`\n${items.length} Prompts\n`))
         items.slice(0, 30).forEach((p, i) => {
           console.log(`  ${chalk.dim(i + 1 + '.')} ${p.content || p.keyword || '—'}`)
@@ -737,7 +758,8 @@ program
         const topics = result.data || []
         console.log(chalk.bold(`\n${topics.length} Topics\n`))
         topics.forEach((t) => {
-          console.log(`  ${chalk.cyan(t.name || t.topic_name || '—')} ${chalk.dim(`(${t.prompt_count || 0} prompts)`)}`)
+          console.log(`  ${chalk.cyan(t.name || t.topic_name || '—')} ${chalk.dim(t.topic_id || t.id || '')}`)
+          if (t.description) console.log(`    ${t.description}`)
         })
       }
     } catch (error) {
@@ -801,7 +823,7 @@ actions
       if (opts.json) {
         console.log(jsonOutput(result.data))
       } else {
-        const items = result.data?.items || result.data || []
+        const items = Array.isArray(result.data) ? result.data : (result.data?.prompts || result.data?.items || [])
         console.log(chalk.bold(`\n${items.length} Actions\n`))
         if (items.length === 0) {
           console.log(chalk.dim('  No actions found. Run `topify actions recommend` to generate suggestions.'))
@@ -1259,7 +1281,7 @@ webhooks
       if (opts.json) {
         console.log(jsonOutput(result.data))
       } else {
-        const items = result.data?.items || result.data || []
+        const items = Array.isArray(result.data) ? result.data : (result.data?.prompts || result.data?.items || [])
         if (items.length === 0) {
           console.log(chalk.dim('\nNo webhooks registered.\n'))
         } else {
@@ -1484,4 +1506,9 @@ aliases
     }
   })
 
+require('../src/domestic').registerDomestic(program)
+require('../src/tool').registerTool(program)
+require('../src/export').registerExport(program, getClient, resolveProject)
+require('../src/data').registerData(program, getClient, resolveProject)
+require('../src/web-data').registerWebData(program)
 program.parse()

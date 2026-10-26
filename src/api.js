@@ -4,59 +4,73 @@ const BASE_URL = process.env.TOPIFY_API_BASE
   || 'https://topify-customer-api-production.up.railway.app/api/public/v1'
 
 class TopifyAPI {
-  constructor(apiKey) {
+  constructor(apiKey, { timeoutMs = Number(process.env.TOPIFY_TIMEOUT_MS || 90000) } = {}) {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('timeoutMs must be positive')
     this.apiKey = apiKey
+    this.timeoutMs = timeoutMs
+  }
+
+  async exchange(url, method = 'GET', body = null) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs)
+    try {
+      const response = await fetch(url.toString(), {
+        method,
+        redirect: 'error',
+        signal: controller.signal,
+        headers: { 'X-API-Key': this.apiKey, 'Content-Type': 'application/json' },
+        ...(body !== null ? { body: JSON.stringify(body) } : {}),
+      })
+      if (response.status === 204) return null
+      const data = await response.json().catch(error => {
+        if (controller.signal.aborted) throw error
+        if (response.ok) throw new Error('API returned invalid JSON')
+        return { detail: response.statusText }
+      })
+      if (!response.ok) {
+        const detail = data.detail || data.message || `API error: ${response.status}`
+        throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+      }
+      return data
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error(`API request timed out after ${this.timeoutMs}ms; outcome may be unknown, request was not retried`)
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  async download(path, params = {}) {
+    const url = new URL(`${BASE_URL}${path}`)
+    for (const [key, value] of Object.entries(params)) if (value != null) url.searchParams.set(key, value)
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs)
+    try {
+      const response = await fetch(url, { headers: { 'X-API-Key': this.apiKey }, redirect: 'error', signal: controller.signal })
+      if (!response.ok) throw new Error(`Report API returned HTTP ${response.status}`)
+      if (!(response.headers.get('content-type') || '').includes('text/html')) throw new Error('Report API did not return HTML')
+      return await response.buffer()
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error('Report download timed out; no partial file saved')
+      throw error
+    } finally { clearTimeout(timer) }
   }
 
   async request(path, params = {}) {
     const url = new URL(`${BASE_URL}${path}`)
     Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        url.searchParams.append(key, value)
-      }
+      if (value !== undefined && value !== null) url.searchParams.append(key, value)
     })
-
-    const response = await fetch(url.toString(), {
-      headers: {
-        'X-API-Key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-    })
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: response.statusText }))
-      throw new Error(error.detail || error.message || `API error: ${response.status}`)
-    }
-
-    return response.json()
+    return this.exchange(url)
   }
 
   async mutate(method, path, body = null) {
-    const url = `${BASE_URL}${path}`
-    const options = {
-      method,
-      headers: {
-        'X-API-Key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-    }
-    if (body) {
-      options.body = JSON.stringify(body)
-    }
-
-    const response = await fetch(url, options)
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: response.statusText }))
-      throw new Error(error.detail || error.message || `API error: ${response.status}`)
-    }
-
-    return response.json()
+    return this.exchange(new URL(`${BASE_URL}${path}`), method, body)
   }
 
   // Projects
   async listProjects() {
-    return this.request('/projects')
+    return this.request('/projects/')
   }
 
   async getProject(projectId) {
@@ -134,28 +148,16 @@ class TopifyAPI {
   }
 
   async deleteAlias(projectId, alias) {
-    const url = new URL(
-      `${BASE_URL}/projects/${projectId}/aliases?alias=${encodeURIComponent(alias)}`,
-    )
-    const response = await fetch(url.toString(), {
-      method: 'DELETE',
-      headers: {
-        'X-API-Key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-    })
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: response.statusText }))
-      throw new Error(error.detail || error.message || `API error: ${response.status}`)
-    }
-    return response.json()
+    return this.mutate('DELETE', `/projects/${projectId}/aliases?alias=${encodeURIComponent(alias)}`)
   }
 
   // Prompts
   async listPrompts(projectId, opts = {}) {
     return this.request(`/projects/${projectId}/prompts`, {
-      page: opts.page,
-      page_size: opts.pageSize,
+      duration_days: opts.days,
+      date_from: opts.from,
+      date_to: opts.to,
+      providers: opts.providers,
     })
   }
 
@@ -230,7 +232,7 @@ class TopifyAPI {
 
   // Visibility trends
   async getVisibilityTrends(projectId, opts = {}) {
-    return this.request(`/projects/${projectId}/visibility-trends`, {
+    return this.request(`/projects/${projectId}/visibility`, {
       duration_days: opts.days,
       date_from: opts.from,
       date_to: opts.to,
@@ -240,7 +242,7 @@ class TopifyAPI {
 
   // Sources analytics
   async getSourcesAnalytics(projectId, opts = {}) {
-    return this.request(`/projects/${projectId}/sources-analytics`, {
+    return this.request(`/projects/${projectId}/sources/analytics`, {
       duration_days: opts.days,
       date_from: opts.from,
       date_to: opts.to,

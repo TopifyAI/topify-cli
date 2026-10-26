@@ -1,0 +1,4 @@
+interface:
+  display_name: "Topify Reddit 抓帖"
+  short_description: "在 Codex 中查找 Reddit 帖子并保留来源、原文和覆盖限制"
+  default_prompt: "使用 $topify-reddit 查找 r/robotics 最近一周与 cleaning robot 有关的帖子。"
