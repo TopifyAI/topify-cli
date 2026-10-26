@@ -21,7 +21,7 @@
 
 - Run contract tests before the existing GitHub Actions npm publication, update its OIDC-capable runtime, and validate packaged files before publishing.
 - Update the vulnerable transitive `fast-uri` dependency within its compatible range. Release audit reports zero known vulnerabilities.
-- Ship this changelog with the npm package.
+- Ship this changelog with the npm package and supply the repository metadata required by trusted publishing.
 
 ### Not included
 
