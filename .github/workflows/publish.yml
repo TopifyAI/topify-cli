@@ -13,7 +13,6 @@ on:
 # id-token is set.
 permissions:
   contents: read
-  id-token: write
 
 # Serialize publish runs so a fast follow-up push can't race with one already
 # uploading to npm. cancel-in-progress: false because aborting mid-publish
@@ -23,12 +22,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  test:
     runs-on: ubuntu-latest
-    # Require manual approval through the `npm-publish` GitHub Environment
-    # before any code in this job runs. This means a poisoned package.json
-    # merged to main can NOT publish without an approver clicking through.
-    # Configure the environment + reviewers under repo Settings -> Environments.
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: npm test
+
+  publish:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    # Environment approval works only when required reviewers are configured
+    # in repository Settings; the environment name alone does not enforce it.
     environment: npm-publish
     steps:
       # Pin actions by full SHA so a tag retag can't smuggle malicious code
@@ -36,11 +48,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11   # v4.1.1
 
-      - name: Set up Node 20 + npm registry
+      - name: Set up Node 22 + npm registry
         uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8   # v4.0.2
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Install OIDC-capable npm
+        run: npm install --global npm@11.6.2 --ignore-scripts
 
       # Skip if package.json version is already on npm. We branch on the
       # specific E404 stderr signal so transient registry / network failures
@@ -86,10 +101,10 @@ jobs:
         if: steps.check.outputs.should_publish == 'true'
         run: |
           set -euo pipefail
-          npm publish --dry-run --json > /tmp/pack.json
+          npm pack --dry-run --ignore-scripts --json > /tmp/pack.json
           BAD=$(node -p "
-            const list = require('/tmp/pack.json').files.map(f => f.path);
-            const allow = /^(bin\\/|src\\/|README\\.md$|package\\.json$|LICENSE$)/;
+            const list = require('/tmp/pack.json')[0].files.map(f => f.path);
+            const allow = /^(bin\\/|src\\/|(README|CHANGELOG)\\.md$|package\\.json$|LICENSE$)/;
             list.filter(p => !allow.test(p)).join('\\n');
           ")
           if [ -n "$BAD" ]; then

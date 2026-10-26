@@ -1,13 +1,14 @@
 {
   "name": "topify-cli",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Topify AI Visibility CLI - Monitor your brand's presence in AI search results",
   "bin": {
     "topify": "bin/topify.js"
   },
-  "main": "src/index.js",
+  "main": "src/api.js",
   "scripts": {
-    "start": "node bin/topify.js"
+    "start": "node bin/topify.js",
+    "test": "node --test test/*.test.js"
   },
   "keywords": [
     "topify",
@@ -31,6 +32,11 @@
   "files": [
     "bin",
     "src",
-    "README.md"
-  ]
+    "!src/reddit.js",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
 }

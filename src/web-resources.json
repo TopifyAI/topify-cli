@@ -1,0 +1,371 @@
+{
+  "overview-chats": {
+    "method": "POST",
+    "path": "/api/v1/overview/chats",
+    "source": "app/api/v1/overview/chats/route.ts"
+  },
+  "overview-settings": {
+    "method": "POST",
+    "path": "/api/v1/overview/settings",
+    "source": "app/api/v1/overview/settings/route.ts"
+  },
+  "overview-sources": {
+    "method": "POST",
+    "path": "/api/v1/overview/sources",
+    "source": "app/api/v1/overview/sources/route.ts"
+  },
+  "overview-visibility": {
+    "method": "POST",
+    "path": "/api/v1/overview/visibility",
+    "source": "app/api/v1/overview/visibility/route.ts"
+  },
+  "competitors-detail-answer": {
+    "method": "POST",
+    "path": "/api/v2/competitors/detail/answer",
+    "source": "app/api/v2/competitors/detail/answer/route.ts",
+    "nested_date_range": true,
+    "required_filters": [
+      "answer_id"
+    ],
+    "filter_options": {
+      "answer": "answer_id"
+    }
+  },
+  "competitors-detail-answers": {
+    "method": "POST",
+    "path": "/api/v2/competitors/detail/answers",
+    "source": "app/api/v2/competitors/detail/answers/route.ts",
+    "nested_date_range": true
+  },
+  "competitors-detail-domain-citation-trend": {
+    "method": "POST",
+    "path": "/api/v2/competitors/detail/domain-citation-trend",
+    "source": "app/api/v2/competitors/detail/domain-citation-trend/route.ts",
+    "nested_date_range": true
+  },
+  "competitors-detail-own-citations": {
+    "method": "POST",
+    "path": "/api/v2/competitors/detail/own-citations",
+    "source": "app/api/v2/competitors/detail/own-citations/route.ts",
+    "nested_date_range": true
+  },
+  "competitors-detail-owned-source-prompts": {
+    "method": "POST",
+    "path": "/api/v2/competitors/detail/owned-source-prompts",
+    "source": "app/api/v2/competitors/detail/owned-source-prompts/route.ts",
+    "nested_date_range": true,
+    "required_filters": [
+      "canonical_url"
+    ],
+    "filter_options": {
+      "url": "canonical_url"
+    }
+  },
+  "competitors-detail-questions": {
+    "method": "POST",
+    "path": "/api/v2/competitors/detail/questions",
+    "source": "app/api/v2/competitors/detail/questions/route.ts",
+    "nested_date_range": true
+  },
+  "competitors-detail-summary": {
+    "method": "POST",
+    "path": "/api/v2/competitors/detail/summary",
+    "source": "app/api/v2/competitors/detail/summary/route.ts",
+    "nested_date_range": true
+  },
+  "competitors-detail-supporting-sources": {
+    "method": "POST",
+    "path": "/api/v2/competitors/detail/supporting-sources",
+    "source": "app/api/v2/competitors/detail/supporting-sources/route.ts",
+    "nested_date_range": true
+  },
+  "competitors-detail-trend": {
+    "method": "POST",
+    "path": "/api/v2/competitors/detail/trend",
+    "source": "app/api/v2/competitors/detail/trend/route.ts",
+    "nested_date_range": true
+  },
+  "sources-chats": {
+    "method": "POST",
+    "path": "/api/v2/sources/chats",
+    "source": "app/api/v2/sources/chats/route.ts",
+    "nested_date_range": true,
+    "nested_pagination": true
+  },
+  "sources-detail": {
+    "method": "POST",
+    "path": "/api/v2/sources/detail",
+    "source": "app/api/v2/sources/detail/route.ts",
+    "nested_date_range": true,
+    "nested_pagination": true
+  },
+  "sources-detail-summary": {
+    "method": "POST",
+    "path": "/api/v2/sources/detail/summary",
+    "source": "app/api/v2/sources/detail/summary/route.ts",
+    "nested_date_range": true
+  },
+  "sources-detail-urls": {
+    "method": "POST",
+    "path": "/api/v2/sources/detail/urls",
+    "source": "app/api/v2/sources/detail/urls/route.ts",
+    "nested_date_range": true,
+    "nested_pagination": true
+  },
+  "sources-list": {
+    "method": "GET",
+    "path": "/api/v2/sources/list",
+    "source": "app/api/v2/sources/list/route.ts",
+    "date_keys": [
+      "start",
+      "end"
+    ],
+    "provider_key": "models"
+  },
+  "sources-provider-breakdown": {
+    "method": "POST",
+    "path": "/api/v2/sources/provider-breakdown",
+    "source": "app/api/v2/sources/provider-breakdown/route.ts",
+    "nested_date_range": true
+  },
+  "sources-table": {
+    "method": "GET",
+    "path": "/api/v2/sources/table",
+    "source": "app/api/v2/sources/table/route.ts",
+    "date_keys": [
+      "start",
+      "end"
+    ],
+    "provider_key": "models"
+  },
+  "sources-top-prompts": {
+    "method": "POST",
+    "path": "/api/v2/sources/top-prompts",
+    "source": "app/api/v2/sources/top-prompts/route.ts",
+    "nested_date_range": true
+  },
+  "prompt-analytics": {
+    "method": "GET",
+    "path": "/api/v2/prompt/{id}/analytics",
+    "source": "app/api/v2/prompt/[prompt_id]/analytics/route.ts"
+  },
+  "prompt-chats": {
+    "method": "GET",
+    "path": "/api/v2/prompt/{id}/chats",
+    "source": "app/api/v2/prompt/[prompt_id]/chats/route.ts",
+    "defaults": {
+      "page": 1,
+      "page_size": 20
+    }
+  },
+  "prompt-domains-chats": {
+    "method": "GET",
+    "path": "/api/v2/prompt/{id}/domains/{domain}/chats",
+    "source": "app/api/v2/prompt/[prompt_id]/domains/[domain]/chats/route.ts"
+  },
+  "prompt-domains-citations": {
+    "method": "GET",
+    "path": "/api/v2/prompt/{id}/domains/{domain}/citations",
+    "source": "app/api/v2/prompt/[prompt_id]/domains/[domain]/citations/route.ts"
+  },
+  "prompt-domains-urls": {
+    "method": "GET",
+    "path": "/api/v2/prompt/{id}/domains/{domain}/urls",
+    "source": "app/api/v2/prompt/[prompt_id]/domains/[domain]/urls/route.ts"
+  },
+  "prompt-domains": {
+    "method": "GET",
+    "path": "/api/v2/prompt/{id}/domains",
+    "source": "app/api/v2/prompt/[prompt_id]/domains/route.ts"
+  },
+  "prompt-urls": {
+    "method": "GET",
+    "path": "/api/v2/prompt/{id}/urls",
+    "source": "app/api/v2/prompt/[prompt_id]/urls/route.ts"
+  },
+  "prompt-competitor-overview-aggregate": {
+    "method": "POST",
+    "path": "/api/v2/prompt/competitor-overview/aggregate",
+    "source": "app/api/v2/prompt/competitor-overview/aggregate/route.ts",
+    "filter_options": {
+      "promptIds": "prompt_ids"
+    }
+  },
+  "prompt-competitor-overview": {
+    "method": "POST",
+    "path": "/api/v2/prompt/competitor-overview",
+    "source": "app/api/v2/prompt/competitor-overview/route.ts",
+    "filter_options": {
+      "promptIds": "prompt_ids"
+    }
+  },
+  "prompt-outputs-fanouts": {
+    "method": "GET",
+    "path": "/api/v2/prompt/outputs/{id}/fanouts",
+    "source": "app/api/v2/prompt/outputs/[output_id]/fanouts/route.ts"
+  },
+  "prompt-outputs": {
+    "method": "GET",
+    "path": "/api/v2/prompt/outputs/{id}",
+    "source": "app/api/v2/prompt/outputs/[output_id]/route.ts"
+  },
+  "prompts-fanouts-insights": {
+    "method": "GET",
+    "path": "/api/v2/prompts/fanouts/insights",
+    "source": "app/api/v2/prompts/fanouts/insights/route.ts"
+  },
+  "prompts-fanouts-prompts": {
+    "method": "GET",
+    "path": "/api/v2/prompts/fanouts/prompts",
+    "source": "app/api/v2/prompts/fanouts/prompts/route.ts",
+    "required_filters": [
+      "fanout_query"
+    ],
+    "filter_options": {
+      "fanoutQuery": "fanout_query"
+    }
+  },
+  "prompts-fanouts": {
+    "method": "GET",
+    "path": "/api/v2/prompts/fanouts",
+    "source": "app/api/v2/prompts/fanouts/route.ts"
+  },
+  "seo-competitors": {
+    "method": "GET",
+    "path": "/api/v2/seo/{project}/competitors",
+    "source": "app/api/v2/seo/[projectId]/competitors/route.ts"
+  },
+  "seo-gsc-countries": {
+    "method": "GET",
+    "path": "/api/v2/seo/{project}/gsc/countries",
+    "source": "app/api/v2/seo/[projectId]/gsc/countries/route.ts"
+  },
+  "seo-gsc-devices": {
+    "method": "GET",
+    "path": "/api/v2/seo/{project}/gsc/devices",
+    "source": "app/api/v2/seo/[projectId]/gsc/devices/route.ts"
+  },
+  "seo-gsc-pages": {
+    "method": "GET",
+    "path": "/api/v2/seo/{project}/gsc/pages",
+    "source": "app/api/v2/seo/[projectId]/gsc/pages/route.ts"
+  },
+  "seo-gsc-performance": {
+    "method": "GET",
+    "path": "/api/v2/seo/{project}/gsc/performance",
+    "source": "app/api/v2/seo/[projectId]/gsc/performance/route.ts"
+  },
+  "seo-gsc-queries": {
+    "method": "GET",
+    "path": "/api/v2/seo/{project}/gsc/queries",
+    "source": "app/api/v2/seo/[projectId]/gsc/queries/route.ts"
+  },
+  "seo-keywords": {
+    "method": "GET",
+    "path": "/api/v2/seo/{project}/keywords",
+    "source": "app/api/v2/seo/[projectId]/keywords/route.ts"
+  },
+  "seo-overview": {
+    "method": "GET",
+    "path": "/api/v2/seo/{project}/overview",
+    "source": "app/api/v2/seo/[projectId]/overview/route.ts"
+  },
+  "seo-site-info": {
+    "method": "GET",
+    "path": "/api/v2/seo/{project}/site-info",
+    "source": "app/api/v2/seo/[projectId]/site-info/route.ts"
+  },
+  "overview-analysis-prompt": {
+    "method": "POST",
+    "path": "/api/v2/overview/analysis/prompt",
+    "source": "app/api/v2/overview/analysis/prompt/route.ts"
+  },
+  "projects-settings-default-brands": {
+    "method": "GET",
+    "path": "/api/v2/projects/{project}/settings/default-brands",
+    "source": "app/api/v2/projects/[project_id]/settings/default-brands/route.ts"
+  },
+  "projects-settings-table-settings": {
+    "method": "GET",
+    "path": "/api/v2/projects/{project}/settings/table-settings",
+    "source": "app/api/v2/projects/[project_id]/settings/table-settings/route.ts"
+  },
+  "heatmap": {
+    "method": "GET",
+    "path": "/api/heatmap/{project}",
+    "source": "app/api/heatmap/[project_id]/route.ts",
+    "query_fields": [
+      "metric"
+    ],
+    "defaults": {
+      "metric": "visibility"
+    }
+  },
+  "heatmap-topics": {
+    "method": "GET",
+    "path": "/api/heatmap/topics",
+    "source": "app/api/heatmap/topics/route.ts",
+    "query_fields": [
+      "heatmap_only"
+    ]
+  },
+  "heatmap-topic": {
+    "method": "GET",
+    "path": "/api/heatmap/{project}/topics/{id}",
+    "source": "app/api/heatmap/[project_id]/topics/[topic_id]/route.ts",
+    "query_fields": [
+      "metric",
+      "date",
+      "from",
+      "to",
+      "perspective"
+    ],
+    "date_keys": [
+      "from",
+      "to"
+    ],
+    "defaults": {
+      "metric": "visibility"
+    }
+  },
+  "heatmap-keywords": {
+    "method": "GET",
+    "path": "/api/heatmap/{project}/keywords",
+    "source": "app/api/heatmap/[project_id]/keywords/route.ts",
+    "query_fields": []
+  },
+  "providers": {
+    "method": "GET",
+    "path": "/api/providers",
+    "source": "app/api/providers/route.ts"
+  },
+  "tags": {
+    "method": "GET",
+    "path": "/api/v1/tags",
+    "source": "app/api/v1/tags/route.ts"
+  },
+  "prompt-list": {
+    "method": "GET",
+    "path": "/api/v1/prompt",
+    "source": "app/api/v1/prompt/route.ts",
+    "defaults": {
+      "ord": "desc",
+      "lightweight": true
+    },
+    "days_key": "range",
+    "filter_options": {
+      "offset": "offset",
+      "limit": "limit"
+    }
+  },
+  "prompt-answers-export": {
+    "method": "POST",
+    "path": "/api/v2/prompt/answers/export-batch",
+    "source": "app/api/v2/prompt/answers/export-batch/route.ts",
+    "filter_options": {
+      "promptIds": "prompt_ids",
+      "offset": "offset",
+      "limit": "limit"
+    }
+  }
+}

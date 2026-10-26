@@ -2,6 +2,7 @@ const Conf = require('conf')
 
 const config = new Conf({
   projectName: 'topify-cli',
+  ...(process.env.TOPIFY_CONFIG_DIR ? { cwd: process.env.TOPIFY_CONFIG_DIR } : {}),
   schema: {
     apiKey: { type: 'string', default: '' },
     defaultProject: { type: 'string', default: '' },
