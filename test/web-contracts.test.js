@@ -24,7 +24,11 @@ test('page-specific filters reach the server in the required structure', async t
   assert.equal(requests.at(-1).url.searchParams.get('ord'),'desc')
   assert.equal(requests.at(-1).url.searchParams.get('range'),'30')
   assert.equal(requests.at(-1).url.searchParams.get('lightweight'),'true')
+  await api.candidateVolume('  Which air purifiers are quiet?  ')
+  assert.equal(requests.at(-1).url.pathname, '/api/v2/internal/candidate-volume')
+  assert.deepEqual(requests.at(-1).body, { prompt: 'Which air purifiers are quiet?' })
   const before=requests.length
+  await assert.rejects(api.candidateVolume('  '))
   for(const opts of [{days:'NaN'},{days:'-1'},{page:'0'},{from:'2026-02-30',to:'2026-03-01'},{from:'2026-01-01'}]) {
     await assert.rejects(api.read('overview-visibility',{project:'p',...opts}))
   }
