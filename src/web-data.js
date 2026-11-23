@@ -84,9 +84,17 @@ class WebDataAPI {
     }
     const url = new URL(route, this.base)
     if (spec.method === 'GET') for (const [key,value] of Object.entries(payload)) url.searchParams.set(key, Array.isArray(value) ? value.join(',') : typeof value === 'object' ? JSON.stringify(value) : value)
+    return this.request(url, spec.method, payload, resource)
+  }
+  async candidateVolume(prompt) {
+    const text = prompt.trim()
+    if (!text || [...text].length > 2000) throw new Error('Supply a prompt of 1–2000 characters')
+    return this.request(new URL('/api/v2/internal/candidate-volume', this.base), 'POST', { prompt: text }, 'ai-volume')
+  }
+  async request(url, method, payload, resource) {
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), this.timeoutMs)
     try {
-      const response = await fetch(url, { method:spec.method, headers:{ Cookie:this.cookie, Accept:'application/json', 'Content-Type':'application/json' }, redirect:'manual', signal:controller.signal, ...(spec.method === 'POST' ? { body:JSON.stringify(payload) } : {}) })
+      const response = await fetch(url, { method, headers:{ Cookie:this.cookie, Accept:'application/json', 'Content-Type':'application/json' }, redirect:'manual', signal:controller.signal, ...(method === 'POST' ? { body:JSON.stringify(payload) } : {}) })
       if (response.status === 401 || (response.status >= 300 && response.status < 400)) throw new Error('Overseas dashboard session expired; refresh TOPIFY_WEB_COOKIE_FILE')
       if (!response.ok) throw new Error(`Page data returned HTTP ${response.status}`)
       if (!(response.headers.get('content-type') || '').includes('application/json')) throw new Error('Expected JSON from dashboard; refresh your session')
@@ -115,7 +123,17 @@ function selectRows(data, selector) {
   if (!Array.isArray(selected)) throw new Error(`Response field ${selector} is not an array`)
   return selected
 }
+function readSessionCookie() {
+  return process.env.TOPIFY_WEB_COOKIE_FILE ? fs.readFileSync(process.env.TOPIFY_WEB_COOKIE_FILE, 'utf8').trim() : ''
+}
 function registerWebData(program) {
+  program.command('ai-volume <prompt>').description('Estimate monthly AI Volume for a candidate prompt (US/English; internal overseas dashboard session)')
+    .action(async prompt => {
+      try {
+        const result = await new WebDataAPI({ cookie: readSessionCookie() }).candidateVolume(prompt)
+        process.stdout.write(JSON.stringify(result.data, null, 2) + '\n')
+      } catch (error) { console.error(error.message); process.exitCode = 1 }
+    })
   program.command('web-resources [resource]').description('Inspect read resources and required filters without credentials')
     .action(resource => {
       if (resource && !Object.hasOwn(resources, resource)) { console.error('Unknown page data resource'); process.exitCode = 1; return }
@@ -137,7 +155,7 @@ function registerWebData(program) {
     .addHelpText('after', '\nAvailable resources:\n' + Object.entries(resources).map(([name,spec]) => name + (spec.required_filters ? ' (filters-file: ' + spec.required_filters.join(', ') + ')' : '')).join('\n'))
     .action(async (resource, opts) => {
       try {
-        const cookie = process.env.TOPIFY_WEB_COOKIE_FILE ? fs.readFileSync(process.env.TOPIFY_WEB_COOKIE_FILE, 'utf8').trim() : ''
+        const cookie = readSessionCookie()
         const filters = opts.filtersFile ? JSON.parse(fs.readFileSync(opts.filtersFile, 'utf8')) : {}
         saveExport(selectRows(await new WebDataAPI({ cookie, timeoutMs: Number(opts.timeout) * 1000 }).read(resource, opts, filters), opts.rows), opts)
       } catch (error) { console.error(error.message); process.exitCode = 1 }

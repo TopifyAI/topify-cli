@@ -308,6 +308,14 @@ actions 状态/产物/任务/废弃修改。分页接口通过 `--page`、`--pag
 ### 国外页面独有数据
 
 国外网站中部分数据没有对应的 API Key 接口。`web-data` 调用页面自身的已认证查询接口，
+海外内部账号可用同一会话直接估算候选 Prompt，每次查询一条，无需创建项目或导入 Prompt。
+
+```bash
+topify ai-volume "Which air purifiers are quiet enough for a small bedroom?"
+```
+
+当前查询范围为美国、英语。JSON 中的 `ai_volume` 是平台月度需求估算值；`null` 表示没有匹配的关键词数据，`0` 是计算结果。查询失败时命令以非零状态退出。
+
 使用单独的 `TOPIFY_WEB_COOKIE_FILE`，默认 `https://app.topify.ai`，不复用国内 Cookie。
 服务端仍负责用户、团队和项目授权；不会使用 service-role 或数据库密钥。
 
